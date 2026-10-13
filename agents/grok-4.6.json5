@@ -1,8 +1,8 @@
 {
     "vendor": "SpaceXAI",
     "name": "Grok 4.6",
-    "api-key": "C:/MyLife/Game-deck-generator/API_KEY_XAI",
-    "token-limit": 128000,
+    "api-key": "api-key or path to file with api-key",
+    "token-limit": 500000,
     "iteration-limit": 50,
-    "USD-limit": 0.5,
+    "USD-limit": 10,
 }
