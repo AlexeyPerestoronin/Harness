@@ -1,0 +1,5 @@
+[package]
+name = "logger"
+version.workspace = true
+edition.workspace = true
+description = "Session logger trait and stdout+file / no-op implementations for harness."

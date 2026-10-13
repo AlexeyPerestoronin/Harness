@@ -1,0 +1,24 @@
+[package]
+name = "harness"
+version.workspace = true
+edition.workspace = true
+description = "Native harness.exe: CLI, agent loop, xAI and Google HTTP agents."
+
+[dependencies]
+# Load and validate harness.json5 / model files; generate --conf-new templates.
+conf = { path = "../conf" }
+# Session logger (stdout + log.md).
+logger = { path = "../logger" }
+# Tool registry assembled from the conf `tools` object.
+tools = { path = "../tools" }
+# JSON for dump files and HTTP bodies.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Blocking HTTP client for xAI and Google REST APIs.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# Conversation / chat identifiers for xAI.
+uuid = { version = "1", features = ["v4"] }
+# Session folder timestamps and execution-time formatting.
+chrono = "0.4"
+# Random 5..=20 s delay on Google HTTP 503.
+rand = "0.8"

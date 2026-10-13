@@ -1,0 +1,32 @@
+harness.exe — native agent loop.
+
+USAGE:
+    harness.exe --help
+    harness.exe [--conf <path>] --prompt "<user prompt>"
+    harness.exe [--conf <path>] --dump "<path to dump file>"
+    harness.exe --conf-new "<path to new conf file>"
+
+FLAGS:
+    --help
+        Print this help and exit with code 0.
+
+    --conf <path>
+        Path to harness.json5. Optional. Default: <process-cwd>/harness.json5
+        (the current working directory of the process, not settings.cwd).
+        Cannot be combined with --conf-new.
+
+    --prompt "<user prompt>"
+        Start a new session with this user prompt.
+
+    --dump "<path to dump file>"
+        Continue a session from a dump file. The prompt is taken from dump
+        history; --prompt is not used.
+
+    --conf-new "<path to new conf file>"
+        Write a full commented JSON5 template to the path and exit.
+        Does not start the loop, the agent or any network calls.
+        Fails if the file already exists. Creates missing parent directories.
+
+RULES:
+    --prompt, --dump and --conf-new are mutually exclusive.
+    One of --prompt, --dump or --conf-new is required.

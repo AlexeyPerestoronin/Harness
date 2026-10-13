@@ -1,0 +1,13 @@
+# Rust
+target/
+dist/
+
+#API_KEYs
+API_KEY*
+
+# Logs
+.log
+
+# build results
+harness.exe
+harness.json5

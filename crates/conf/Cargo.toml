@@ -1,0 +1,11 @@
+[package]
+name = "conf"
+version.workspace = true
+edition.workspace = true
+description = "Load, validate and template harness JSON5 configuration."
+
+[dependencies]
+# Deserialize json5 documents into serde_json::Value.
+serde_json = "1"
+# Parse JSON5 (comments, trailing commas) used by harness.json5 and model files.
+json5 = "0.4"
