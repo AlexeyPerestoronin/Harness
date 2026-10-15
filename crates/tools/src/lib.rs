@@ -1,30 +1,24 @@
 //! Tool registry for the native harness.
 //!
-//! Each tool-set lives in its own module (`fs`, `git`, `search`, `terminal`,
-//! `meta`, `user`). The registry is assembled from the conf `tools` object:
-//! a missing key skips the module, an unknown name is rejected at load time
-//! by `conf`. Agents see a flat list of descriptors and call tools by name.
+//! Each tool-set lives in its own module (`fs`, `git`, `terminal`, `user`).
+//! The registry is assembled from the conf `tools` object: a missing key skips
+//! the module, an unknown name is rejected at load time by `conf`. Agents see
+//! a flat list of descriptors and call tools by name.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use logger::Logger;
 use serde_json::{Map, Value};
 
 pub mod fs;
 pub mod git;
-pub mod meta;
 pub mod process;
-pub mod sandbox;
-pub mod search;
 pub mod terminal;
 pub mod user;
 
 use fs::FsModule;
 use git::GitModule;
-use meta::MetaModule;
-use sandbox::Sandbox;
-use search::SearchModule;
 use terminal::TerminalModule;
 use user::UserModule;
 
@@ -77,9 +71,7 @@ impl CallResult {
 enum Module {
     Fs(FsModule),
     Git(GitModule),
-    Search(SearchModule),
     Terminal(TerminalModule),
-    Meta(MetaModule),
     User(UserModule),
 }
 
@@ -92,9 +84,7 @@ impl Module {
         match self {
             Module::Fs(_) => FsModule::descriptors(),
             Module::Git(_) => GitModule::descriptors(),
-            Module::Search(_) => SearchModule::descriptors(),
             Module::Terminal(_) => TerminalModule::descriptors(),
-            Module::Meta(_) => MetaModule::descriptors(),
             Module::User(_) => UserModule::descriptors(),
         }
     }
@@ -103,9 +93,7 @@ impl Module {
         match self {
             Module::Fs(m) => m.call(name, args),
             Module::Git(m) => m.call(name, args),
-            Module::Search(m) => m.call(name, args),
             Module::Terminal(m) => m.call(name, args),
-            Module::Meta(m) => m.call(name, args),
             Module::User(m) => m.call(name, args),
         }
     }
@@ -130,19 +118,12 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     /// Assemble modules from typed conf settings.
     pub fn build(settings: &conf::ToolsSettings, ctx: ToolsContext) -> Self {
-        let sandbox = Arc::new(Mutex::new(match &settings.fs {
-            Some(fs) => Sandbox::from_fs(
-                &fs.available_dirs,
-                &fs.extra_scope,
-                &fs.available_file_extensions,
-            ),
-            None => Sandbox::empty(),
-        }));
         let _ = std::fs::create_dir_all(&ctx.temp_dir);
 
         let mut modules = Vec::new();
-        if settings.fs.is_some() {
-            modules.push(Module::Fs(FsModule::new(sandbox.clone())));
+        let (fs_module, sandbox) = FsModule::build(settings.fs.as_ref());
+        if let Some(m) = fs_module {
+            modules.push(Module::Fs(m));
         }
         if let Some(git) = &settings.git {
             modules.push(Module::Git(GitModule::new(
@@ -153,14 +134,6 @@ impl ToolRegistry {
                 ctx.temp_dir.clone(),
             )));
         }
-        if settings.search.is_some() {
-            modules.push(Module::Search(SearchModule::new(sandbox.clone())));
-        }
-        let shell_commands = settings
-            .terminal
-            .as_ref()
-            .map(|t| t.available_commands.clone())
-            .unwrap_or_default();
         let command_timeout = settings
             .terminal
             .as_ref()
@@ -172,12 +145,6 @@ impl ToolRegistry {
                 term.available_commands.clone(),
                 term.command_execution_limit,
                 term.invoke_execution_limit,
-            )));
-        }
-        if settings.meta.is_some() {
-            modules.push(Module::Meta(MetaModule::new(
-                sandbox.clone(),
-                shell_commands,
             )));
         }
         if settings.user.is_some() {
@@ -253,7 +220,7 @@ pub fn arg_str_or_empty(args: &Map<String, Value>, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use conf::{FsSettings, GitSettings, SearchSettings, ToolsSettings};
+    use conf::{FsSettings, GitSettings, TerminalSettings, ToolsSettings};
     use logger::NullLogger;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -274,14 +241,33 @@ mod tests {
     fn registry_builds_only_enabled_modules() {
         let mut settings = ToolsSettings::default();
         settings.fs = Some(FsSettings::default());
-        settings.search = Some(SearchSettings {});
         let reg = ToolRegistry::build(&settings, ctx());
         let names: Vec<_> = reg.list().into_iter().map(|d| d.name).collect();
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"find_str".to_string()));
+        assert!(names.contains(&"find_file_by_str".to_string()));
+        assert!(names.contains(&"list_available_r_dir".to_string()));
         assert!(!names.contains(&"run_shell".to_string()));
+        assert!(!names.contains(&"list_available_shell_commands".to_string()));
         assert!(!names.contains(&"ask_user".to_string()));
         assert!(!names.contains(&"is_file_under_git".to_string()));
+    }
+
+    #[test]
+    fn registry_terminal_owns_shell_list() {
+        let mut settings = ToolsSettings::default();
+        settings.terminal = Some(TerminalSettings {
+            cwd_list: vec![".".into()],
+            available_commands: vec!["cargo".into()],
+            command_execution_limit: 10,
+            invoke_execution_limit: 10,
+        });
+        let reg = ToolRegistry::build(&settings, ctx());
+        let names: Vec<_> = reg.list().into_iter().map(|d| d.name).collect();
+        assert!(names.contains(&"run_shell".to_string()));
+        assert!(names.contains(&"list_available_shell_commands".to_string()));
+        assert!(!names.contains(&"list_available_r_dir".to_string()));
+        assert!(!names.contains(&"find_str".to_string()));
     }
 
     #[test]

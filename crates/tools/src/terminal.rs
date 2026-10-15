@@ -1,14 +1,15 @@
-//! Terminal tool set (`tools.terminal`): `run_shell` and `run_invoke`.
+//! Terminal tool set (`tools.terminal`): `run_shell`, `run_invoke`, and shell allow-list.
 //!
 //! `run_shell` requires the command in `available-commands` and cwd in `cwd-list`.
 //! `run_invoke` does not use the whitelist; it launches `{cwd}/.venv/.../python -m invoke`.
+//! `list_available_shell_commands` reports `available-commands`.
 
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
+use crate::fs::abspath;
 use crate::process::run_observed_command;
-use crate::sandbox::abspath;
 use crate::{arg_str, arg_str_or_empty, CallResult, ToolDescriptor};
 
 /// Shell / invoke tools.
@@ -48,6 +49,7 @@ impl TerminalModule {
         vec![
             desc("run_shell", "Run a command.", json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]})),
             desc("run_invoke", "Run an invoke command.", json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]})),
+            desc("list_available_shell_commands", "List of available shell commands.", json!({})),
         ]
     }
 
@@ -60,6 +62,10 @@ impl TerminalModule {
                 &arg_str_or_empty(args, "arguments"),
             )?)),
             "run_invoke" => Ok(CallResult::plain(self.run_invoke(&arg_str(args, "command")?)?)),
+            "list_available_shell_commands" => Ok(CallResult::plain(format!(
+                "available: {:?}",
+                self.available_commands()
+            ))),
             _ => Err(format!("tool '{name}' not available")),
         }
     }
@@ -203,5 +209,21 @@ mod tests {
         assert!(p.ends_with(Path::new(".venv\\Scripts\\python.exe")) || p.ends_with(".venv/Scripts/python.exe") || p.components().any(|c| c.as_os_str() == "python.exe"));
         #[cfg(not(windows))]
         assert!(p.ends_with(".venv/bin/python"));
+    }
+
+    #[test]
+    fn list_available_shell_commands() {
+        let root = tmp();
+        let m = TerminalModule::new(
+            root.clone(),
+            vec![root.to_string_lossy().into_owned()],
+            vec!["findstr".into(), "cargo".into()],
+            5,
+            5,
+        );
+        let out = m.call("list_available_shell_commands", &Map::new()).unwrap();
+        assert!(out.output.contains("findstr"), "{}", out.output);
+        assert!(out.output.contains("cargo"), "{}", out.output);
+        let _ = fs::remove_dir_all(&root);
     }
 }

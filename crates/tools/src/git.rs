@@ -12,12 +12,12 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
-use crate::sandbox::Sandbox;
+use crate::fs::Sandbox;
 use crate::{arg_str, CallKind, CallResult, ToolDescriptor};
 
 static PATCH_SEQ: AtomicU64 = AtomicU64::new(1);
 
-/// Git tools bound to a shared sandbox and a configured executable.
+/// Git tools bound to the fs allow-list and a configured executable.
 pub struct GitModule {
     sandbox: Arc<Mutex<Sandbox>>,
     executable: String,
@@ -27,7 +27,7 @@ pub struct GitModule {
 }
 
 impl GitModule {
-    /// Construct from conf values and the shared sandbox.
+    /// Construct from conf values and the allow-list owned by `fs`.
     pub fn new(
         sandbox: Arc<Mutex<Sandbox>>,
         executable: String,

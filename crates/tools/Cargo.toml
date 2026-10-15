@@ -2,7 +2,7 @@
 name = "tools"
 version.workspace = true
 edition.workspace = true
-description = "Agent tool modules (fs, git, search, terminal, meta, user) and sandbox."
+description = "Agent tool modules (fs, git, terminal, user)."
 
 [dependencies]
 # Typed tool-module settings produced by the conf crate.
@@ -11,7 +11,7 @@ conf = { path = "../conf" }
 logger = { path = "../logger" }
 # JSON Schema descriptors and tool-call argument objects.
 serde_json = "1"
-# Regular expressions for find_str_by_regex.
+# Regular expressions for find_str_by_regex and find_files_by_regex.
 regex = "1"
 # Decode command output as utf-8 / oem / cp1251.
 encoding_rs = "0.8"

@@ -63,12 +63,8 @@ pub const RPD: &str = "rpd";
 pub const TOOL_FS: &str = "fs";
 /// Git tools module.
 pub const TOOL_GIT: &str = "git";
-/// Search tools module.
-pub const TOOL_SEARCH: &str = "search";
 /// Shell / invoke tools module.
 pub const TOOL_TERMINAL: &str = "terminal";
-/// Introspection tools module.
-pub const TOOL_META: &str = "meta";
 /// User-interaction tools module.
 pub const TOOL_USER: &str = "user";
 

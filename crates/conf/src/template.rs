@@ -55,7 +55,10 @@ pub fn template_text() -> String {
     // Enabled tool modules. Key = module name (`crates/tools/src/<name>.rs`).
     // Missing key → module is not registered. Unknown key → startup error.
     "{tools}": {{
-        // Filesystem tools: read/write/create/remove/move file and folder, list_folder.
+        // Filesystem tools: read/write/create/remove/move file and folder, list_folder;
+        // find_str, find_str_by_regex, find_file_by_str, find_files_by_regex;
+        // list_available_file_extension, list_available_r_dir, list_available_w_dir,
+        // list_available_r_file, list_available_w_file.
         "{tool_fs}": {{
             // Directory allow-list. Prefix `r:` (read) or `w:` (write; implies read). Match by abspath prefix.
             "{available_dirs}": [
@@ -76,9 +79,7 @@ pub fn template_text() -> String {
             // Timeout in seconds for git subprocesses.
             "{execution_limit}": {execution_limit_default}
         }},
-        // Search tools: find_str, find_str_by_regex. Uses the shared fs sandbox.
-        "{tool_search}": {{}},
-        // Shell tools: run_shell, run_invoke.
+        // Shell tools: run_shell, run_invoke, list_available_shell_commands.
         "{tool_terminal}": {{
             // Allowed cwd values for run_shell (abspath prefix match), separate from `{available_dirs}`.
             "{cwd_list}": [
@@ -94,8 +95,6 @@ pub fn template_text() -> String {
             // Timeout in seconds for run_invoke. Required if `{tool_terminal}` is enabled.
             "{invoke_execution_limit}": {execution_limit_default}
         }},
-        // Introspection: list_available_* for extensions, dirs, files, shell commands.
-        "{tool_meta}": {{}},
         // User interaction: ask_user, request_*_access_for, request_command_shell_execution.
         "{tool_user}": {{}}
     }}
@@ -130,13 +129,11 @@ pub fn template_text() -> String {
         git_ph = keys::PLACEHOLDER_GIT_EXECUTABLE,
         execution_limit = keys::EXECUTION_LIMIT,
         execution_limit_default = keys::DEFAULT_EXECUTION_LIMIT,
-        tool_search = keys::TOOL_SEARCH,
         tool_terminal = keys::TOOL_TERMINAL,
         cwd_list = keys::CWD_LIST,
         available_commands = keys::AVAILABLE_COMMANDS,
         command_execution_limit = keys::COMMAND_EXECUTION_LIMIT,
         invoke_execution_limit = keys::INVOKE_EXECUTION_LIMIT,
-        tool_meta = keys::TOOL_META,
         tool_user = keys::TOOL_USER,
     )
 }

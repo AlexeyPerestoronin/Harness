@@ -15,8 +15,8 @@ pub use error::ConfError;
 pub use load::load;
 pub use template::{template_text, write_new_conf};
 pub use types::{
-    AgentKind, AgentSettings, FsSettings, GitSettings, MetaSettings, Mode, SearchSettings,
-    Settings, TerminalSettings, ToolsSettings, UserSettings,
+    AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings, TerminalSettings,
+    ToolsSettings, UserSettings,
 };
 
 #[cfg(test)]
@@ -112,8 +112,6 @@ mod tests {
             r#"{{
                 "{fs}": {{ "{dirs}": ["w:src"], "{ext}": [], "{extra}": ["r:README.md"] }},
                 "{git}": {{ "{exe}": "C:/git/git.exe", "{lim}": 30 }},
-                "{search}": {{}},
-                "{meta}": {{}},
                 "{user}": {{}}
             }}"#,
             fs = keys::TOOL_FS,
@@ -123,8 +121,6 @@ mod tests {
             git = keys::TOOL_GIT,
             exe = keys::EXECUTABLE,
             lim = keys::EXECUTION_LIMIT,
-            search = keys::TOOL_SEARCH,
-            meta = keys::TOOL_META,
             user = keys::TOOL_USER,
         );
         let conf = dir.join("harness.json5");
@@ -138,7 +134,6 @@ mod tests {
         assert!(settings.agent.mode.is_safe());
         assert!(settings.tools.fs.is_some());
         assert!(settings.tools.git.is_some());
-        assert!(settings.tools.search.is_some());
         assert!(settings.tools.terminal.is_none());
         assert_eq!(
             settings.tools.git.as_ref().unwrap().executable,
@@ -155,6 +150,22 @@ mod tests {
         write(&conf, &harness_body("grok.json5", r#"{ "nope": {} }"#));
         let err = load(&conf).unwrap_err().to_string();
         assert!(err.contains("unknown tool module"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_and_meta_are_unknown_tool_modules() {
+        let dir = tmp_dir("search-meta");
+        write(&dir.join("grok.json5"), &model_body("k"));
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("grok.json5", r#"{ "search": {} }"#));
+        let err = load(&conf).unwrap_err().to_string();
+        assert!(err.contains("unknown tool module"), "{err}");
+        assert!(err.contains("search"), "{err}");
+        write(&conf, &harness_body("grok.json5", r#"{ "meta": {} }"#));
+        let err = load(&conf).unwrap_err().to_string();
+        assert!(err.contains("unknown tool module"), "{err}");
+        assert!(err.contains("meta"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -274,10 +285,12 @@ mod tests {
         assert!(text.contains(&format!("\"{}\"", keys::TOOLS)));
         assert!(text.contains(&format!("\"{}\"", keys::TOOL_FS)));
         assert!(text.contains(&format!("\"{}\"", keys::TOOL_GIT)));
-        assert!(text.contains(&format!("\"{}\"", keys::TOOL_SEARCH)));
         assert!(text.contains(&format!("\"{}\"", keys::TOOL_TERMINAL)));
-        assert!(text.contains(&format!("\"{}\"", keys::TOOL_META)));
         assert!(text.contains(&format!("\"{}\"", keys::TOOL_USER)));
+        assert!(!text.contains("\"search\":"));
+        assert!(!text.contains("\"meta\":"));
+        assert!(text.contains("find_str"));
+        assert!(text.contains("list_available_shell_commands"));
         assert!(text.contains("//"));
         assert!(text.contains(keys::PLACEHOLDER_GIT_EXECUTABLE));
         assert!(text.contains(keys::PLACEHOLDER_CWD));

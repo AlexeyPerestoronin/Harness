@@ -1,7 +1,7 @@
 //! User-interaction tool set (`tools.user`): questions and runtime access grants.
 //!
 //! Confirmations always go through stdin (`y` / `yes` / `д` / `да`). Path grants
-//! mutate the shared sandbox. `request_command_shell_execution` runs the command
+//! mutate the allow-list owned by `fs`. `request_command_shell_execution` runs the command
 //! once on approval and does not add it to the terminal whitelist.
 
 use std::io::{self, Write};
@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
 
+use crate::fs::Sandbox;
 use crate::process::run_observed_command;
-use crate::sandbox::Sandbox;
 use crate::{arg_str, CallResult, ToolDescriptor};
 
 /// User-interaction tools.
@@ -21,7 +21,7 @@ pub struct UserModule {
 }
 
 impl UserModule {
-    /// Bind to the shared sandbox. `command_timeout` comes from terminal settings
+    /// Bind to the allow-list owned by `fs`. `command_timeout` comes from terminal settings
     /// when that module is enabled.
     pub fn new(sandbox: Arc<Mutex<Sandbox>>, command_timeout: Option<u64>) -> Self {
         Self {
@@ -166,7 +166,6 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::Sandbox;
 
     #[test]
     fn descriptors_registered() {

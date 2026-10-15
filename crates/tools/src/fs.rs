@@ -1,7 +1,8 @@
-//! Filesystem tool set (`tools.fs`): read/write/create/remove/move for files and folders.
+//! Filesystem tool set (`tools.fs`): files/folders, search, and allow-list introspection.
 //!
-//! Access is gated by the shared sandbox. `write_file` creates parent directories;
-//! `create_file` does not and truncates an existing file.
+//! This module owns `available-dirs`, `available-file-extensions` and `extra-scope`.
+//! `write_file` creates parent directories; `create_file` does not and truncates
+//! an existing file.
 
 use std::fs;
 use std::path::Path;
@@ -9,18 +10,41 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
 
-use crate::sandbox::Sandbox;
 use crate::{arg_str, CallKind, CallResult, ToolDescriptor};
 
-/// Filesystem tools bound to a shared sandbox.
+mod access;
+mod search;
+
+pub use access::{abspath, Sandbox};
+
+/// Filesystem tools bound to the allow-list this module owns.
 pub struct FsModule {
     sandbox: Arc<Mutex<Sandbox>>,
 }
 
 impl FsModule {
-    /// Wrap an existing sandbox.
+    /// Wrap an existing allow-list.
     pub fn new(sandbox: Arc<Mutex<Sandbox>>) -> Self {
         Self { sandbox }
+    }
+
+    /// Build the fs module and the allow-list it owns.
+    ///
+    /// When `settings` is `None` there is no module and the allow-list is empty
+    /// (still shared with `git` / `user`).
+    pub fn build(settings: Option<&conf::FsSettings>) -> (Option<Self>, Arc<Mutex<Sandbox>>) {
+        match settings {
+            Some(fs) => {
+                let module = Self::new(Arc::new(Mutex::new(Sandbox::from_fs(
+                    &fs.available_dirs,
+                    &fs.extra_scope,
+                    &fs.available_file_extensions,
+                ))));
+                let sandbox = module.sandbox.clone();
+                (Some(module), sandbox)
+            }
+            None => (None, Arc::new(Mutex::new(Sandbox::empty()))),
+        }
     }
 
     /// JSON Schema descriptors for the fs tools.
@@ -35,6 +59,15 @@ impl FsModule {
             desc("create_folder", "Create a folder.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
             desc("remove_folder", "Delete a folder.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
             desc("move_folder", "Move a folder.", json!({"type":"object","properties":{"src":{"type":"string"},"dst":{"type":"string"}},"required":["src","dst"]})),
+            desc("find_str", "Search for a string in files starting from the root directory.", json!({"type":"object","properties":{"root":{"type":"string"},"string":{"type":"string"}},"required":["root","string"]})),
+            desc("find_str_by_regex", "Search for lines matching a regular expression starting from the root directory.", json!({"type":"object","properties":{"root":{"type":"string"},"regex":{"type":"string"}},"required":["root","regex"]})),
+            desc("find_file_by_str", "Find files whose names contain the given string, starting from the root directory.", json!({"type":"object","properties":{"root":{"type":"string"},"string":{"type":"string"}},"required":["root","string"]})),
+            desc("find_files_by_regex", "Find files whose names match the given regular expression, starting from the root directory.", json!({"type":"object","properties":{"root":{"type":"string"},"regex":{"type":"string"}},"required":["root","regex"]})),
+            desc("list_available_file_extension", "List of available file extensions.", json!({})),
+            desc("list_available_r_dir", "List of directories available for reading.", json!({})),
+            desc("list_available_w_dir", "List of directories available for writing.", json!({})),
+            desc("list_available_r_file", "List of files available for reading.", json!({})),
+            desc("list_available_w_file", "List of files available for writing.", json!({})),
         ]
     }
 
@@ -72,6 +105,31 @@ impl FsModule {
             "move_folder" => Ok(CallResult::plain(
                 self.move_folder(&arg_str(args, "src")?, &arg_str(args, "dst")?)?,
             )),
+            "find_str" => Ok(CallResult::plain(search::find_str(
+                &self.sandbox,
+                &arg_str(args, "root")?,
+                &arg_str(args, "string")?,
+            )?)),
+            "find_str_by_regex" => Ok(CallResult::plain(search::find_str_by_regex(
+                &self.sandbox,
+                &arg_str(args, "root")?,
+                &arg_str(args, "regex")?,
+            )?)),
+            "find_file_by_str" => Ok(CallResult::plain(search::find_file_by_str(
+                &self.sandbox,
+                &arg_str(args, "root")?,
+                &arg_str(args, "string")?,
+            )?)),
+            "find_files_by_regex" => Ok(CallResult::plain(search::find_files_by_regex(
+                &self.sandbox,
+                &arg_str(args, "root")?,
+                &arg_str(args, "regex")?,
+            )?)),
+            "list_available_file_extension" => Ok(CallResult::plain(self.list_extensions()?)),
+            "list_available_r_dir" => Ok(CallResult::plain(self.list_paths(|sb| sb.r_dirs())?)),
+            "list_available_w_dir" => Ok(CallResult::plain(self.list_paths(|sb| sb.w_dirs())?)),
+            "list_available_r_file" => Ok(CallResult::plain(self.list_paths(|sb| sb.r_files())?)),
+            "list_available_w_file" => Ok(CallResult::plain(self.list_paths(|sb| sb.w_files())?)),
             _ => Err(format!("tool '{name}' not available")),
         }
     }
@@ -169,6 +227,20 @@ impl FsModule {
         }
         Ok(())
     }
+
+    fn list_extensions(&self) -> Result<String, String> {
+        let sb = self.sandbox.lock().map_err(|e| e.to_string())?;
+        if sb.extensions().is_empty() {
+            Ok("available: all".to_string())
+        } else {
+            Ok(format!("available: {:?}", sb.extensions()))
+        }
+    }
+
+    fn list_paths(&self, pick: fn(&Sandbox) -> &[String]) -> Result<String, String> {
+        let sb = self.sandbox.lock().map_err(|e| e.to_string())?;
+        Ok(format!("available: {:?}", pick(&sb)))
+    }
 }
 
 fn walk_folder(path: &str, depth: i32) -> Vec<String> {
@@ -214,7 +286,6 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::Sandbox;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -226,10 +297,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("fs-mod-{nanos}"));
         fs::create_dir_all(&root).unwrap();
         let sb = Sandbox::from_fs(&[format!("w:{}", root.display())], &[], &[]);
-        (
-            root,
-            FsModule::new(Arc::new(Mutex::new(sb))),
-        )
+        (root, FsModule::new(Arc::new(Mutex::new(sb))))
     }
 
     fn args(pairs: &[(&str, &str)]) -> Map<String, Value> {
@@ -309,8 +377,107 @@ mod tests {
             "create_folder",
             "remove_folder",
             "move_folder",
+            "find_str",
+            "find_str_by_regex",
+            "find_file_by_str",
+            "find_files_by_regex",
+            "list_available_file_extension",
+            "list_available_r_dir",
+            "list_available_w_dir",
+            "list_available_r_file",
+            "list_available_w_file",
         ] {
             assert!(names.contains(&n.to_string()), "{n}");
         }
+        assert!(!names.contains(&"list_available_shell_commands".to_string()));
+    }
+
+    #[test]
+    fn find_file_by_name_not_content() {
+        let (root, fsmod) = setup();
+        fs::write(root.join("needle.txt"), "haystack content").unwrap();
+        fs::write(root.join("other.txt"), "needle in content").unwrap();
+        fs::create_dir_all(root.join("needle_dir")).unwrap();
+
+        let by_name = fsmod
+            .call(
+                "find_file_by_str",
+                &args(&[("root", &root.to_string_lossy()), ("string", "needle")]),
+            )
+            .unwrap()
+            .output;
+        assert!(by_name.contains("needle.txt"), "{by_name}");
+        assert!(!by_name.contains("other.txt"), "{by_name}");
+        assert!(!by_name.contains("needle_dir"), "{by_name}");
+
+        let by_content = fsmod
+            .call(
+                "find_file_by_str",
+                &args(&[("root", &root.to_string_lossy()), ("string", "haystack")]),
+            )
+            .unwrap()
+            .output;
+        assert_eq!(by_content, "");
+
+        let re = fsmod
+            .call(
+                "find_files_by_regex",
+                &args(&[
+                    ("root", &root.to_string_lossy()),
+                    ("regex", r"needle.*\.txt"),
+                ]),
+            )
+            .unwrap()
+            .output;
+        assert!(re.contains("needle.txt"), "{re}");
+        assert!(!re.contains("other.txt"), "{re}");
+
+        let err = fsmod
+            .call(
+                "find_files_by_regex",
+                &args(&[("root", &root.to_string_lossy()), ("regex", "[unclosed")]),
+            )
+            .unwrap_err();
+        assert!(err.contains("cannot find_files_by_regex"), "{err}");
+
+        let denied = fsmod
+            .call(
+                "find_file_by_str",
+                &args(&[("root", "/no/such/outside"), ("string", "x")]),
+            )
+            .unwrap_err();
+        assert!(denied.contains("cannot find_file_by_str"), "{denied}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn grant_write_visible_in_list_available() {
+        let sb = Arc::new(Mutex::new(Sandbox::empty()));
+        let m = FsModule::new(sb.clone());
+        sb.lock().unwrap().grant_path_access("notes.md", 'w');
+        let w = m.call("list_available_w_file", &Map::new()).unwrap();
+        assert!(w.output.contains("notes.md"), "{}", w.output);
+        let r = m.call("list_available_r_file", &Map::new()).unwrap();
+        assert!(r.output.contains("notes.md"), "{}", r.output);
+        let ext = m.call("list_available_file_extension", &Map::new()).unwrap();
+        assert_eq!(ext.output, "available: all");
+    }
+
+    #[test]
+    fn lists_follow_allow_list() {
+        let sb = Sandbox::from_fs(
+            &["w:src".into(), "r:docs".into()],
+            &["r:README.md".into()],
+            &[".md".into()],
+        );
+        let m = FsModule::new(Arc::new(Mutex::new(sb)));
+        let ext = m.call("list_available_file_extension", &Map::new()).unwrap();
+        assert!(ext.output.contains(".md"), "{}", ext.output);
+        let rdir = m.call("list_available_r_dir", &Map::new()).unwrap();
+        assert!(rdir.output.contains("src"), "{}", rdir.output);
+        assert!(rdir.output.contains("docs"), "{}", rdir.output);
+        let wdir = m.call("list_available_w_dir", &Map::new()).unwrap();
+        assert!(wdir.output.contains("src"), "{}", wdir.output);
+        assert!(!wdir.output.contains("docs"), "{}", wdir.output);
     }
 }

@@ -84,12 +84,8 @@ pub struct ToolsSettings {
     pub fs: Option<FsSettings>,
     /// Git tools.
     pub git: Option<GitSettings>,
-    /// Search tools.
-    pub search: Option<SearchSettings>,
     /// Shell / invoke tools.
     pub terminal: Option<TerminalSettings>,
-    /// Introspection tools.
-    pub meta: Option<MetaSettings>,
     /// User-interaction tools.
     pub user: Option<UserSettings>,
 }
@@ -114,10 +110,6 @@ pub struct GitSettings {
     pub execution_limit: u64,
 }
 
-/// Settings for the `search` module. The module has no fields.
-#[derive(Debug, Clone, Default)]
-pub struct SearchSettings {}
-
 /// Settings for the `terminal` module.
 #[derive(Debug, Clone, Default)]
 pub struct TerminalSettings {
@@ -130,10 +122,6 @@ pub struct TerminalSettings {
     /// Timeout for `run_invoke` in seconds.
     pub invoke_execution_limit: u64,
 }
-
-/// Settings for the `meta` module. The module has no fields.
-#[derive(Debug, Clone, Default)]
-pub struct MetaSettings {}
 
 /// Settings for the `user` module. The module has no fields.
 #[derive(Debug, Clone, Default)]

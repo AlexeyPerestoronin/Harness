@@ -1,8 +1,8 @@
-//! Shared access-control sandbox used by fs / git / search / user.
+//! Allow-lists for directories, exact files and extensions, owned by `fs`.
 //!
 //! Directories are matched by `abspath` prefix; extra-scope files by exact
 //! `abspath`. A `w:` grant always implies `r:`. Empty extension list means any
-//! extension is allowed. The sandbox is mutated at runtime by `request_*`.
+//! extension is allowed. The lists are mutated at runtime by `request_*`.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -17,7 +17,7 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    /// Build a sandbox from `tools.fs` entries. Unknown / unprefixed items are skipped.
+    /// Build from `tools.fs` entries. Unknown / unprefixed items are skipped.
     pub fn from_fs(
         available_dirs: &[String],
         extra_scope: &[String],
@@ -32,7 +32,7 @@ impl Sandbox {
         sb
     }
 
-    /// Empty sandbox (no `fs` module in conf).
+    /// Empty allow-list (no `fs` module in conf).
     pub fn empty() -> Self {
         Self::default()
     }

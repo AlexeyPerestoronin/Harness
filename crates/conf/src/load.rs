@@ -8,8 +8,8 @@ use serde_json::Value;
 use crate::error::ConfError;
 use crate::str::keys;
 use crate::types::{
-    AgentKind, AgentSettings, FsSettings, GitSettings, MetaSettings, Mode, SearchSettings,
-    Settings, TerminalSettings, ToolsSettings, UserSettings,
+    AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings, TerminalSettings,
+    ToolsSettings, UserSettings,
 };
 
 /// Load and validate a harness configuration file.
@@ -203,12 +203,8 @@ fn load_tools(obj: &serde_json::Map<String, Value>) -> Result<ToolsSettings, Con
             settings.fs = Some(load_fs(module)?);
         } else if name == keys::TOOL_GIT {
             settings.git = Some(load_git(module)?);
-        } else if name == keys::TOOL_SEARCH {
-            settings.search = Some(SearchSettings {});
         } else if name == keys::TOOL_TERMINAL {
             settings.terminal = Some(load_terminal(module)?);
-        } else if name == keys::TOOL_META {
-            settings.meta = Some(MetaSettings {});
         } else if name == keys::TOOL_USER {
             settings.user = Some(UserSettings {});
         } else {
