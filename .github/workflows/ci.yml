@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build release
+        run: cargo build --release --workspace
+
+      - name: Read version from Cargo.toml
+        id: version
+        shell: bash
+        run: |
+          version="$(
+            grep -A 20 '^\[workspace.package\]' Cargo.toml \
+              | grep '^version =' \
+              | head -n 1 \
+              | cut -d '"' -f 2
+          )"
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Could not read [workspace.package].version from Cargo.toml" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Artifact name
+        id: artifact
+        shell: bash
+        run: |
+          name="harness-${{ steps.version.outputs.version }}"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            name="${name}.exe"
+            echo "path=target/release/harness.exe" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=target/release/harness" >> "$GITHUB_OUTPUT"
+          fi
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Delete previous artifacts with the same name
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: ${{ steps.artifact.outputs.name }}
+        shell: bash
+        run: |
+          if ! echo "$ARTIFACT_NAME" | grep -Eq '^harness-[0-9]+\.[0-9]+\.[0-9]+(\.exe)?$'; then
+            echo "Unexpected artifact name: $ARTIFACT_NAME" >&2
+            exit 1
+          fi
+          ids="$(gh api --paginate \
+            "/repos/${{ github.repository }}/actions/artifacts?name=${ARTIFACT_NAME}" \
+            --jq '.artifacts[].id' | tr -d '\r')"
+          for id in $ids; do
+            gh api --method DELETE "/repos/${{ github.repository }}/actions/artifacts/${id}"
+          done
+
+      - name: Upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.path }}
+          if-no-files-found: error
+          overwrite: true
