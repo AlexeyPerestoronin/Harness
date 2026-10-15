@@ -33,10 +33,10 @@ impl UserModule {
     /// JSON Schema descriptors for the user tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("ask_user", "Задать вопрос пользователю и получить ответ.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"]})),
-            desc("request_read_access_for", "Запрос у пользователя read-доступа к папке/файлу.", json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]})),
-            desc("request_write_access_for", "Запрос у пользователя write-доступа к папке/файлу.", json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]})),
-            desc("request_command_shell_execution", "Запрос у пользователя исполнения shell-команды.", json!({"type":"object","properties":{"reason":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"}},"required":["reason","command","cwd"]})),
+            desc("ask_user", "Ask the user a question and get the answer.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"]})),
+            desc("request_read_access_for", "Request read access to a folder/file from the user.", json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]})),
+            desc("request_write_access_for", "Request write access to a folder/file from the user.", json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]})),
+            desc("request_command_shell_execution", "Request permission from the user to execute a shell command.", json!({"type":"object","properties":{"reason":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"}},"required":["reason","command","cwd"]})),
         ]
     }
 

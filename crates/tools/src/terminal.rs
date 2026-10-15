@@ -46,8 +46,8 @@ impl TerminalModule {
     /// JSON Schema descriptors for the terminal tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("run_shell", "Запуск команды.", json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]})),
-            desc("run_invoke", "Запуск команды invoke.", json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]})),
+            desc("run_shell", "Run a command.", json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]})),
+            desc("run_invoke", "Run an invoke command.", json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]})),
         ]
     }
 

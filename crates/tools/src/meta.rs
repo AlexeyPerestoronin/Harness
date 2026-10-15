@@ -28,12 +28,12 @@ impl MetaModule {
     /// JSON Schema descriptors for the meta tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("list_available_file_extension", "Список доступных расширений файлов."),
-            desc("list_available_r_dir", "Список доступных директорий для чтения."),
-            desc("list_available_w_dir", "Список доступных директорий для записи."),
-            desc("list_available_r_file", "Список доступных файлов для чтения."),
-            desc("list_available_w_file", "Список доступных файлов для записи."),
-            desc("list_available_shell_commands", "Список доступных shell команд."),
+            desc("list_available_file_extension", "List of available file extensions."),
+            desc("list_available_r_dir", "List of directories available for reading."),
+            desc("list_available_w_dir", "List of directories available for writing."),
+            desc("list_available_r_file", "List of files available for reading."),
+            desc("list_available_w_file", "List of files available for writing."),
+            desc("list_available_shell_commands", "List of available shell commands."),
         ]
     }
 

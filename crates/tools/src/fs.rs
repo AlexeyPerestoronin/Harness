@@ -26,15 +26,15 @@ impl FsModule {
     /// JSON Schema descriptors for the fs tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("read_file", "Прочитать содержимое файла.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("write_file", "Записать файл.", json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]})),
-            desc("create_file", "Создать файл.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("remove_file", "Удалить файл.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("move_file", "Переместить файл.", json!({"type":"object","properties":{"src":{"type":"string"},"dst":{"type":"string"}},"required":["src","dst"]})),
-            desc("list_folder", "Возвращает содержимое директории на заданную глубину (depth >= 0, где 0 - только корневое содержимое).", json!({"type":"object","properties":{"path":{"type":"string"},"depth":{"type":"string"}},"required":["path","depth"]})),
-            desc("create_folder", "Создать папку.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("remove_folder", "Удалить папку.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("move_folder", "Переместить папку.", json!({"type":"object","properties":{"src":{"type":"string"},"dst":{"type":"string"}},"required":["src","dst"]})),
+            desc("read_file", "Read the contents of a file.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("write_file", "Write a file.", json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]})),
+            desc("create_file", "Create a file.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("remove_file", "Delete a file.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("move_file", "Move a file.", json!({"type":"object","properties":{"src":{"type":"string"},"dst":{"type":"string"}},"required":["src","dst"]})),
+            desc("list_folder", "Return the contents of a directory to the given depth (depth >= 0, where 0 is root contents only).", json!({"type":"object","properties":{"path":{"type":"string"},"depth":{"type":"string"}},"required":["path","depth"]})),
+            desc("create_folder", "Create a folder.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("remove_folder", "Delete a folder.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("move_folder", "Move a folder.", json!({"type":"object","properties":{"src":{"type":"string"},"dst":{"type":"string"}},"required":["src","dst"]})),
         ]
     }
 

@@ -47,10 +47,10 @@ impl GitModule {
     /// JSON Schema descriptors for the git tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("is_file_under_git", "Проверить, находится ли файл под контролем git.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("apply_diff_patch", "Применить diff-патч к файлам (в стиле git т.к. под капотом git apply).", json!({"type":"object","properties":{"patch":{"type":"string"}},"required":["patch"]})),
-            desc("get_file_diff", "Получить diff для целевого файла.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("discard_file_changes", "Отменить изменения файла после HEAD.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("is_file_under_git", "Check whether a file is tracked by git.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("apply_diff_patch", "Apply a diff patch to files (git-style, because it uses git apply under the hood).", json!({"type":"object","properties":{"patch":{"type":"string"}},"required":["patch"]})),
+            desc("get_file_diff", "Get the diff for the target file.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
+            desc("discard_file_changes", "Discard file changes after HEAD.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
         ]
     }
 

@@ -28,8 +28,8 @@ impl SearchModule {
     /// JSON Schema descriptors for the search tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("find_str", "Поиск строки в файлах начиная с корневого каталога.", json!({"type":"object","properties":{"root":{"type":"string"},"string":{"type":"string"}},"required":["root","string"]})),
-            desc("find_str_by_regex", "Поиск строк по регулярному выражению начиная с корневого каталога.", json!({"type":"object","properties":{"root":{"type":"string"},"regex":{"type":"string"}},"required":["root","regex"]})),
+            desc("find_str", "Search for a string in files starting from the root directory.", json!({"type":"object","properties":{"root":{"type":"string"},"string":{"type":"string"}},"required":["root","string"]})),
+            desc("find_str_by_regex", "Search for lines matching a regular expression starting from the root directory.", json!({"type":"object","properties":{"root":{"type":"string"},"regex":{"type":"string"}},"required":["root","regex"]})),
         ]
     }
 
