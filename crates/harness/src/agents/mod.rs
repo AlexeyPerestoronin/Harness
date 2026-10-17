@@ -91,6 +91,9 @@ pub fn gemini_tools(list: &[ToolDescriptor]) -> serde_json::Value {
 }
 
 /// Convert registry descriptors into Anthropic tool definitions.
+///
+/// Anthropic requires `input_schema.type`. No-arg tools may be `{}` in the
+/// registry; those get `type: object` so the Messages API does not 400.
 pub fn claude_tools(list: &[ToolDescriptor]) -> serde_json::Value {
     serde_json::Value::Array(
         list.iter()
@@ -98,11 +101,25 @@ pub fn claude_tools(list: &[ToolDescriptor]) -> serde_json::Value {
                 serde_json::json!({
                     "name": t.name,
                     "description": t.description,
-                    "input_schema": t.parameters,
+                    "input_schema": claude_input_schema(&t.parameters),
                 })
             })
             .collect(),
     )
+}
+
+/// Ensure a JSON Schema object has `type` (required by Claude `input_schema`).
+fn claude_input_schema(parameters: &serde_json::Value) -> serde_json::Value {
+    let mut schema = parameters.clone();
+    match schema.as_object_mut() {
+        Some(obj) => {
+            if !obj.contains_key("type") {
+                obj.insert("type".into(), serde_json::json!("object"));
+            }
+            schema
+        }
+        None => serde_json::json!({"type": "object"}),
+    }
 }
 
 /// Dispatch a tool call and return the result string (including execution errors).
@@ -119,5 +136,39 @@ pub fn invoke_tool(
             logger.log_line(&format!("❌ fail → {msg}"));
             msg
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_tools_adds_type_to_empty_schema() {
+        let list = [ToolDescriptor {
+            name: "list_available_file_extension".into(),
+            description: "List of available file extensions.".into(),
+            parameters: serde_json::json!({}),
+        }];
+        let tools = claude_tools(&list);
+        assert_eq!(tools[0]["name"], "list_available_file_extension");
+        assert_eq!(tools[0]["input_schema"]["type"], "object");
+    }
+
+    #[test]
+    fn claude_tools_preserves_existing_schema() {
+        let list = [ToolDescriptor {
+            name: "read_file".into(),
+            description: "Read a file.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+            }),
+        }];
+        let tools = claude_tools(&list);
+        assert_eq!(tools[0]["input_schema"]["type"], "object");
+        assert_eq!(tools[0]["input_schema"]["required"][0], "path");
+        assert_eq!(tools[0]["input_schema"]["properties"]["path"]["type"], "string");
     }
 }
