@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use tools::ToolRegistry;
 use uuid::Uuid;
 
-use conf::{AgentKind, AgentSettings};
 use super::{invoke_tool, openai_tools, Agent, UsageStats};
+use conf::{AgentKind, AgentSettings};
 
 const XAI_URL: &str = "https://api.x.ai/v1/chat/completions";
 
@@ -154,7 +154,8 @@ impl Agent for XaiAgent {
                 self.logger.log_line("```");
                 self.logger.log_line(prompt);
                 self.logger.log_line("```");
-                self.messages.push(json!({"role": "user", "content": prompt}));
+                self.messages
+                    .push(json!({"role": "user", "content": prompt}));
             }
         }
         let parsed = self.execute_request()?;
@@ -350,6 +351,15 @@ fn json_f64(v: &Value) -> Option<f64> {
 
 /// xAI puts USD on `usage` (and sometimes on the root). Values may be numbers or numeric strings.
 fn parse_cost_usd(root: &Value, usage: &Value) -> f64 {
+    // 1. Сначала ищем точные тики (целое число) в новых ответах xAI
+    for src in [usage, root] {
+        if let Some(ticks) = src.get("cost_in_usd_ticks").and_then(|v| v.as_u64()) {
+            const TICKS_PER_USD: f64 = 10_000_000_000.0;
+            return ticks as f64 / TICKS_PER_USD;
+        }
+    }
+
+    // 2. Если тиков нет, откатываемся к старым ключам с плавающей запятой
     const KEYS: &[&str] = &[
         "cost_in_usd",
         "cost_usd",
@@ -364,6 +374,7 @@ fn parse_cost_usd(root: &Value, usage: &Value) -> f64 {
             }
         }
     }
+
     0.0
 }
 
