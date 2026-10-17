@@ -348,4 +348,28 @@ mod tests {
         assert!(text.contains("\"usage\""));
         assert!(!text.contains("conv_id"));
     }
+
+    #[test]
+    #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
+    fn live_availability() {
+        let key = super::super::live_support::read_api_key("Claude");
+        let (logger, tools) = super::super::live_support::tools();
+        let settings = super::super::live_support::settings(
+            "Claude",
+            "Claude Sonnet 5.5",
+            key,
+            AgentKind::Claude {
+                api_model: "claude-sonnet-5-5".into(),
+            },
+            None,
+        );
+        let mut agent = ClaudeAgent::new(tools, logger, &settings).unwrap();
+        let result = agent.iteration(Some(super::super::live_support::PROMPT));
+        assert!(
+            result.is_ok(),
+            "Claude live request failed: {:?}",
+            result.err()
+        );
+        assert!(agent.consumed_tokens() > 0);
+    }
 }

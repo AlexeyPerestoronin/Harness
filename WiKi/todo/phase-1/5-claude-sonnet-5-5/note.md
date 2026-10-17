@@ -1,9 +1,17 @@
 # Действия с вашей стороны
 
-Не требуются для приёмки задачи.
+Live-тесты доступности моделей **не** входят в `cargo test --workspace` (`#[ignore]`).
 
-Чтобы реально запустить Claude (сеть в тестах не дергалась):
+Запуск вручную (ключ каждого вендора спросит в консоли):
 
-1. В `agents/claude-sonnet-5-5.json5` заменить плейсхолдер `api-key` на ключ или путь к `API_KEY_CLAUDE`.
-2. В `harness.json5` указать `"config"` на этот model file.
-3. `harness.exe --prompt "..."`.
+```
+cargo test -p harness -- --ignored --nocapture --test-threads=1
+```
+
+Один вендор:
+
+```
+cargo test -p harness claude::tests::live_availability -- --ignored --nocapture
+cargo test -p harness xai::tests::live_availability -- --ignored --nocapture
+cargo test -p harness google::tests::live_availability -- --ignored --nocapture
+```

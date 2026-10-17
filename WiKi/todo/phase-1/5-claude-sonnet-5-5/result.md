@@ -10,3 +10,11 @@
 - `README.en.md` / `README.ru.md` в корне нет (задача 4) → не создавал и не правил
 
 Проверка: `cargo test --workspace` — conf 14, harness 14, tools 30.
+
+# Результат: revision-1
+
+- Grok USD всегда 0 → `parse_xai_response` брал только `cost_usd`/`usage.cost` как f64 → `parse_cost_usd` читает `cost_in_usd`/`cost_usd`/`cost`/`total_cost_usd`/`total_cost` в `usage` и в корне, число или numeric string (xAI отдаёт cost не в том ключе/типе, что ждал парсер)
+- не было live-тестов доступности → `#[ignore]` `live_availability` у Claude/xAI/Google: ключ с stdin, вопрос «Ты доступен? Какой ты AI?», проверяем `Ok` и tokens > 0; `cargo test --workspace` их не гоняет
+- Claude live проверен ключом `API_KEY_CLAUDE` → ok, ключ из кода удалён
+
+Проверка: `cargo test --workspace` — 16 harness (3 ignored) + conf 14 + tools 30; `claude::tests::live_availability --ignored` — ok.

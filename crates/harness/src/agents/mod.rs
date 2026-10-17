@@ -121,3 +121,63 @@ pub fn invoke_tool(
         }
     }
 }
+
+/// Helpers for ignored live availability tests (manual run only, not CI).
+#[cfg(test)]
+pub(crate) mod live_support {
+    use std::io::{self, Write};
+    use std::sync::Arc;
+
+    use conf::{AgentKind, AgentSettings, Mode, ToolsSettings};
+    use logger::{Logger, NullLogger};
+    use tools::{ToolRegistry, ToolsContext};
+
+    pub const PROMPT: &str = "Ты доступен? Какой ты AI?";
+
+    pub fn read_api_key(vendor: &str) -> String {
+        eprint!("API key for {vendor}: ");
+        let _ = io::stderr().flush();
+        let mut key = String::new();
+        io::stdin()
+            .read_line(&mut key)
+            .expect("read API key from stdin");
+        let key = key.trim().to_string();
+        assert!(!key.is_empty(), "{vendor} API key must not be empty");
+        key
+    }
+
+    pub fn tools() -> (Arc<dyn Logger>, Arc<ToolRegistry>) {
+        let logger: Arc<dyn Logger> = Arc::new(NullLogger);
+        let registry = Arc::new(ToolRegistry::build(
+            &ToolsSettings::default(),
+            ToolsContext {
+                cwd: std::env::temp_dir(),
+                temp_dir: std::env::temp_dir(),
+                logger: logger.clone(),
+            },
+        ));
+        (logger, registry)
+    }
+
+    pub fn settings(
+        vendor: &str,
+        name: &str,
+        api_key: String,
+        kind: AgentKind,
+        rpm: Option<u32>,
+    ) -> AgentSettings {
+        AgentSettings {
+            vendor: vendor.to_string(),
+            name: name.to_string(),
+            api_key,
+            kind,
+            mode: Mode::AutoAccept,
+            token_limit: -1,
+            iteration_limit: -1,
+            usd_limit: -1.0,
+            rpm,
+            tpm: None,
+            rpd: None,
+        }
+    }
+}

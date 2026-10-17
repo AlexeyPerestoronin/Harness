@@ -323,12 +323,7 @@ fn parse_xai_response(text: &str) -> Result<ParsedXai, String> {
                 .and_then(|x| x.as_i64())
         })
         .unwrap_or(0);
-    let cost_usd = v
-        .get("cost_usd")
-        .and_then(|x| x.as_f64())
-        .or_else(|| usage.get("cost_usd").and_then(|x| x.as_f64()))
-        .or_else(|| usage.get("cost").and_then(|x| x.as_f64()))
-        .unwrap_or(0.0);
+    let cost_usd = parse_cost_usd(&v, &usage);
     Ok(ParsedXai {
         role,
         content,
@@ -344,6 +339,32 @@ fn parse_xai_response(text: &str) -> Result<ParsedXai, String> {
 
 fn json_i64(v: &Value, key: &str) -> i64 {
     v.get(key).and_then(|x| x.as_i64()).unwrap_or(0)
+}
+
+fn json_f64(v: &Value) -> Option<f64> {
+    v.as_f64()
+        .or_else(|| v.as_i64().map(|n| n as f64))
+        .or_else(|| v.as_u64().map(|n| n as f64))
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+}
+
+/// xAI puts USD on `usage` (and sometimes on the root). Values may be numbers or numeric strings.
+fn parse_cost_usd(root: &Value, usage: &Value) -> f64 {
+    const KEYS: &[&str] = &[
+        "cost_in_usd",
+        "cost_usd",
+        "cost",
+        "total_cost_usd",
+        "total_cost",
+    ];
+    for src in [usage, root] {
+        for key in KEYS {
+            if let Some(v) = src.get(*key).and_then(json_f64) {
+                return v;
+            }
+        }
+    }
+    0.0
 }
 
 #[cfg(test)]
@@ -402,5 +423,50 @@ mod tests {
         assert_eq!(back.conv_id, "cv");
         assert_eq!(back.usage_stats.input_tokens, 3);
         assert_eq!(back.messages.len(), 1);
+    }
+
+    #[test]
+    fn parse_cost_from_numeric_string_and_cost_in_usd() {
+        let body = r#"{
+            "choices": [{ "message": { "role": "assistant", "content": "hi" } }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 4,
+                "cost_in_usd": "0.02"
+            }
+        }"#;
+        let p = parse_xai_response(body).unwrap();
+        assert!((p.cost_usd - 0.02).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_cost_from_root_cost() {
+        let body = r#"{
+            "choices": [{ "message": { "role": "assistant", "content": "hi" } }],
+            "usage": { "prompt_tokens": 1, "completion_tokens": 1 },
+            "cost": 0.03
+        }"#;
+        let p = parse_xai_response(body).unwrap();
+        assert!((p.cost_usd - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
+    fn live_availability() {
+        let key = super::super::live_support::read_api_key("SpaceXAI");
+        let (logger, tools) = super::super::live_support::tools();
+        let settings = super::super::live_support::settings(
+            "SpaceXAI",
+            "Grok 4.6",
+            key,
+            AgentKind::Xai {
+                api_model: "grok-4.6".into(),
+            },
+            None,
+        );
+        let mut agent = XaiAgent::new(tools, logger, &settings).unwrap();
+        let result = agent.iteration(Some(super::super::live_support::PROMPT));
+        assert!(result.is_ok(), "xAI live request failed: {:?}", result.err());
+        assert!(agent.consumed_tokens() > 0);
     }
 }
