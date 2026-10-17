@@ -1,0 +1,40 @@
+{
+    "cwd": "C:/MyLife/Harness",
+    "paths": {
+        "log-folder": ".log"
+    },
+    "agent-setting": {
+        "config": "<target >",
+        "mode": "safe",
+        "token-limit": 32000,
+        "iteration-limit": 10,
+        "USD-limit": 0.1
+    },
+    // Enabled tool modules. Key = module name (`crates/tools/src/<name>.rs`).
+    // Missing key → module is not registered. Unknown key → startup error.
+    "tools": {
+        "fs": {
+            "available-dirs": [
+            ],
+            "available-file-extensions": [
+            ],
+            "extra-scope": [
+                "w:crates/harness/src/agents/live_tests/test-file.txt"
+            ]
+        },
+        "git": {
+            "executable": "git",
+            "execution-limit": 120
+        },
+        "terminal": {
+            "cwd-list": [
+                "."
+            ],
+            "available-commands": [
+            ],
+            "command-execution-limit": 180,
+            "invoke-execution-limit": 180
+        },
+        "user": {}
+    }
+}
