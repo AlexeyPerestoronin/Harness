@@ -453,17 +453,7 @@ mod tests {
     #[test]
     #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
     fn live_availability() {
-        let key = super::super::live_support::read_api_key("SpaceXAI");
-        let (logger, tools) = super::super::live_support::tools();
-        let settings = super::super::live_support::settings(
-            "SpaceXAI",
-            "Grok 4.6",
-            key,
-            AgentKind::Xai {
-                api_model: "grok-4.6".into(),
-            },
-            None,
-        );
+        let (settings, logger, tools) = super::super::live_support::prepare("grok-4.6.json5");
         let mut agent = XaiAgent::new(tools, logger, &settings).unwrap();
         let result = agent.iteration(Some(super::super::live_support::PROMPT));
         assert!(result.is_ok(), "xAI live request failed: {:?}", result.err());

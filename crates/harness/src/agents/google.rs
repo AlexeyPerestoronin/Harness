@@ -401,17 +401,8 @@ mod tests {
     #[test]
     #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
     fn live_availability() {
-        let key = super::super::live_support::read_api_key("GoogleAI");
-        let (logger, tools) = super::super::live_support::tools();
-        let settings = super::super::live_support::settings(
-            "GoogleAI",
-            "Gemini 3.8 Flash",
-            key,
-            AgentKind::Google {
-                api_model: "gemini-3.8-flash".into(),
-            },
-            Some(5),
-        );
+        let (settings, logger, tools) =
+            super::super::live_support::prepare("gemini-3.8-flash.json5");
         let mut agent = GoogleAgent::new(tools, logger, &settings).unwrap();
         let result = agent.iteration(Some(super::super::live_support::PROMPT));
         assert!(

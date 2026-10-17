@@ -352,17 +352,8 @@ mod tests {
     #[test]
     #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
     fn live_availability() {
-        let key = super::super::live_support::read_api_key("Claude");
-        let (logger, tools) = super::super::live_support::tools();
-        let settings = super::super::live_support::settings(
-            "Claude",
-            "Claude Sonnet 5.5",
-            key,
-            AgentKind::Claude {
-                api_model: "claude-sonnet-5-5".into(),
-            },
-            None,
-        );
+        let (settings, logger, tools) =
+            super::super::live_support::prepare("claude-sonnet-5-5.json5");
         let mut agent = ClaudeAgent::new(tools, logger, &settings).unwrap();
         let result = agent.iteration(Some(super::super::live_support::PROMPT));
         assert!(

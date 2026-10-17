@@ -18,3 +18,11 @@
 - Claude live проверен ключом `API_KEY_CLAUDE` → ok, ключ из кода удалён
 
 Проверка: `cargo test --workspace` — 16 harness (3 ignored) + conf 14 + tools 30; `claude::tests::live_availability --ignored` — ok.
+
+# Результат: revision-2
+
+- live-тесты писали в NullLogger → DoubleLogger в `.log/live/<timestamp>_<vendor>_<name>/log.md` (нужно смотреть историю вопрос-ответ)
+- синтетический `live_support::settings` (vendor/name/kind/rpm вручную) → `conf::load_model(./agents/*.json5)` + API-ключ с stdin (реальные model files, ключ не из плейсхолдера)
+- не было загрузки model file без harness.json5 → `conf::load_model` (лимиты из model file; mode задаёт вызывающий)
+
+Проверка: `cargo test --workspace` — conf 15, harness 16 (3 ignored), tools 30.

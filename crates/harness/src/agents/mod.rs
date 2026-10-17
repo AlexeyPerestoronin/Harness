@@ -126,15 +126,17 @@ pub fn invoke_tool(
 #[cfg(test)]
 pub(crate) mod live_support {
     use std::io::{self, Write};
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use conf::{AgentKind, AgentSettings, Mode, ToolsSettings};
-    use logger::{Logger, NullLogger};
+    use chrono::Local;
+    use conf::{load_model, AgentSettings, Mode, ToolsSettings};
+    use logger::{DoubleLogger, Logger};
     use tools::{ToolRegistry, ToolsContext};
 
     pub const PROMPT: &str = "Ты доступен? Какой ты AI?";
 
-    pub fn read_api_key(vendor: &str) -> String {
+    fn read_api_key(vendor: &str) -> String {
         eprint!("API key for {vendor}: ");
         let _ = io::stderr().flush();
         let mut key = String::new();
@@ -146,8 +148,31 @@ pub(crate) mod live_support {
         key
     }
 
-    pub fn tools() -> (Arc<dyn Logger>, Arc<ToolRegistry>) {
-        let logger: Arc<dyn Logger> = Arc::new(NullLogger);
+    fn workspace_root() -> PathBuf {
+        let raw = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        raw.canonicalize().unwrap_or(raw)
+    }
+
+    /// Load `./agents/{model_file}`, take the API key from stdin, log Q&A via DoubleLogger.
+    pub fn prepare(model_file: &str) -> (AgentSettings, Arc<dyn Logger>, Arc<ToolRegistry>) {
+        let model_path = workspace_root().join("agents").join(model_file);
+        let mut settings = load_model(&model_path, Mode::AutoAccept).unwrap_or_else(|e| {
+            panic!("cannot load agent file '{}': {e}", model_path.display())
+        });
+        settings.api_key = read_api_key(&settings.vendor);
+
+        let stamp = Local::now().format("%Y-%m-%d %H-%M-%S");
+        let log_file = workspace_root()
+            .join(".log")
+            .join("live")
+            .join(format!(
+                "{}_{}_{}",
+                stamp, settings.vendor, settings.name
+            ))
+            .join("log.md");
+        eprintln!("live test log: {}", log_file.display());
+        let logger: Arc<dyn Logger> =
+            Arc::new(DoubleLogger::new(&log_file).expect("cannot open live test log"));
         let registry = Arc::new(ToolRegistry::build(
             &ToolsSettings::default(),
             ToolsContext {
@@ -156,28 +181,6 @@ pub(crate) mod live_support {
                 logger: logger.clone(),
             },
         ));
-        (logger, registry)
-    }
-
-    pub fn settings(
-        vendor: &str,
-        name: &str,
-        api_key: String,
-        kind: AgentKind,
-        rpm: Option<u32>,
-    ) -> AgentSettings {
-        AgentSettings {
-            vendor: vendor.to_string(),
-            name: name.to_string(),
-            api_key,
-            kind,
-            mode: Mode::AutoAccept,
-            token_limit: -1,
-            iteration_limit: -1,
-            usd_limit: -1.0,
-            rpm,
-            tpm: None,
-            rpd: None,
-        }
+        (settings, logger, registry)
     }
 }

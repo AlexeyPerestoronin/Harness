@@ -71,6 +71,34 @@ pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
     })
 }
 
+/// Load a model json5 file into [`AgentSettings`].
+///
+/// `mode` is not a model-file field; the caller supplies it.
+/// Session limits (`token-limit`, `iteration-limit`, `USD-limit`) are read from
+/// the model file (unlike [`load`], which takes them from `harness.json5`).
+pub fn load_model(model_path: &Path, mode: Mode) -> Result<AgentSettings, ConfError> {
+    let model_path = if model_path.is_absolute() {
+        model_path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(model_path)
+    };
+    let model_obj = read_model_object(&model_path)?;
+    settings_from_model(&model_obj, mode, None)
+}
+
+fn read_model_object(
+    model_path: &Path,
+) -> Result<serde_json::Map<String, Value>, ConfError> {
+    let model_text = fs::read_to_string(model_path).map_err(|e| {
+        ConfError::new(format!(
+            "cannot read model file '{}': {e}",
+            model_path.display()
+        ))
+    })?;
+    let model_root: Value = json5::from_str(&model_text)?;
+    expect_object(&model_root, &model_path.display().to_string()).cloned()
+}
+
 fn load_agent(agent_obj: &serde_json::Map<String, Value>, conf_dir: &Path) -> Result<AgentSettings, ConfError> {
     let config_rel = required_string(agent_obj, keys::CONFIG)?;
     let mode_raw = required_string(agent_obj, keys::MODE)?;
@@ -99,15 +127,19 @@ fn load_agent(agent_obj: &serde_json::Map<String, Value>, conf_dir: &Path) -> Re
             conf_dir.join(p)
         }
     };
-    let model_text = fs::read_to_string(&model_path).map_err(|e| {
-        ConfError::new(format!(
-            "cannot read model file '{}': {e}",
-            model_path.display()
-        ))
-    })?;
-    let model_root: Value = json5::from_str(&model_text)?;
-    let model_obj = expect_object(&model_root, &model_path.display().to_string())?;
+    let model_obj = read_model_object(&model_path)?;
+    settings_from_model(
+        &model_obj,
+        mode,
+        Some((token_limit, iteration_limit, usd_limit)),
+    )
+}
 
+fn settings_from_model(
+    model_obj: &serde_json::Map<String, Value>,
+    mode: Mode,
+    limits: Option<(i64, i64, f64)>,
+) -> Result<AgentSettings, ConfError> {
     let vendor = required_string(model_obj, keys::VENDOR)?;
     let name = required_string(model_obj, keys::NAME)?;
     let api_key = resolve_api_key(model_obj)?;
@@ -123,6 +155,15 @@ fn load_agent(agent_obj: &serde_json::Map<String, Value>, conf_dir: &Path) -> Re
             rpm = keys::RPM
         )));
     }
+
+    let (token_limit, iteration_limit, usd_limit) = match limits {
+        Some(v) => v,
+        None => (
+            required_i64(model_obj, keys::TOKEN_LIMIT)?,
+            required_i64(model_obj, keys::ITERATION_LIMIT)?,
+            required_f64(model_obj, keys::USD_LIMIT)?,
+        ),
+    };
 
     Ok(AgentSettings {
         vendor,

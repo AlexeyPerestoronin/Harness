@@ -12,7 +12,7 @@ mod template;
 mod types;
 
 pub use error::ConfError;
-pub use load::load;
+pub use load::{load, load_model};
 pub use template::{template_text, write_new_conf};
 pub use types::{
     AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings, TerminalSettings,
@@ -225,6 +225,26 @@ mod tests {
         write(&conf, &harness_body("grok.json5", "{}"));
         let settings = load(&conf).unwrap();
         assert_eq!(settings.agent.api_key, "file-secret");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_model_reads_agent_file() {
+        let dir = tmp_dir("load-model");
+        let path = dir.join("grok.json5");
+        write(&path, &model_body("literal-key"));
+        let settings = load_model(&path, Mode::AutoAccept).unwrap();
+        assert_eq!(settings.vendor, "SpaceXAI");
+        assert_eq!(settings.name, "Grok 4.6");
+        assert_eq!(settings.api_key, "literal-key");
+        assert_eq!(settings.token_limit, 500000);
+        assert_eq!(settings.iteration_limit, 50);
+        assert!((settings.usd_limit + 1.0).abs() < f64::EPSILON);
+        assert!(!settings.mode.is_safe());
+        match &settings.kind {
+            AgentKind::Xai { api_model } => assert_eq!(api_model, "grok-4.6"),
+            other => panic!("expected Xai, got {other:?}"),
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
