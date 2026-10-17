@@ -1,6 +1,6 @@
-//! Vendor-specific HTTP agents (xAI Grok and Google Gemini).
+//! Vendor-specific HTTP agents (xAI Grok, Google Gemini and Anthropic Claude).
 //!
-//! There is no official Rust SDK; both talk REST. The [`Agent`] trait matches
+//! There is no official Rust SDK; they talk REST. The [`Agent`] trait matches
 //! Python `IAgent`: one iteration, finish/stats, dump/reload. The API key is
 //! already resolved by `conf` and is never read from a hardcoded filename.
 
@@ -10,15 +10,17 @@ use std::sync::Arc;
 use logger::Logger;
 use tools::{ToolDescriptor, ToolRegistry};
 
+mod claude;
 mod google;
 mod xai;
 
+pub use claude::ClaudeAgent;
 pub use google::GoogleAgent;
 pub use xai::XaiAgent;
 
 /// Contract implemented by vendor agents.
 pub trait Agent {
-    /// Vendor identifier (`SpaceXAI` / `GoogleAI`).
+    /// Vendor identifier (`SpaceXAI` / `GoogleAI` / `Claude`).
     fn vendor(&self) -> &str;
     /// Display model name from the conf.
     fn model(&self) -> &str;
@@ -86,6 +88,21 @@ pub fn gemini_tools(list: &[ToolDescriptor]) -> serde_json::Value {
         })
         .collect();
     serde_json::json!([{ "functionDeclarations": declarations }])
+}
+
+/// Convert registry descriptors into Anthropic tool definitions.
+pub fn claude_tools(list: &[ToolDescriptor]) -> serde_json::Value {
+    serde_json::Value::Array(
+        list.iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.parameters,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Dispatch a tool call and return the result string (including execution errors).

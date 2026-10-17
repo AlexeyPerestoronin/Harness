@@ -153,6 +153,9 @@ fn agent_kind(vendor: &str, name: &str) -> Result<AgentKind, ConfError> {
         ("GoogleAI", "Gemini 3.1 Flash Lite") => Ok(AgentKind::Google {
             api_model: "gemini-3.1-flash-lite".into(),
         }),
+        ("Claude", "Claude Sonnet 5.5") => Ok(AgentKind::Claude {
+            api_model: "claude-sonnet-5-5".into(),
+        }),
         _ => Err(ConfError::new(format!(
             "unknown agent: {vendor} {name}"
         ))),

@@ -248,6 +248,41 @@ mod tests {
     }
 
     #[test]
+    fn load_claude_sonnet_5_5() {
+        let dir = tmp_dir("claude");
+        write(
+            &dir.join("claude.json5"),
+            &format!(
+                r#"{{
+                "{v}": "Claude",
+                "{n}": "Claude Sonnet 5.5",
+                "{k}": "literal-key",
+                "{token}": 500000,
+                "{iter}": 50,
+                "{usd}": -1
+            }}"#,
+                v = keys::VENDOR,
+                n = keys::NAME,
+                k = keys::API_KEY,
+                token = keys::TOKEN_LIMIT,
+                iter = keys::ITERATION_LIMIT,
+                usd = keys::USD_LIMIT,
+            ),
+        );
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("claude.json5", "{}"));
+        let settings = load(&conf).unwrap();
+        assert_eq!(settings.agent.vendor, "Claude");
+        assert_eq!(settings.agent.name, "Claude Sonnet 5.5");
+        assert_eq!(settings.agent.api_key, "literal-key");
+        match &settings.agent.kind {
+            AgentKind::Claude { api_model } => assert_eq!(api_model, "claude-sonnet-5-5"),
+            other => panic!("expected Claude, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn missing_session_limits_is_error() {
         let dir = tmp_dir("no-limits");
         write(&dir.join("grok.json5"), &model_body("k"));

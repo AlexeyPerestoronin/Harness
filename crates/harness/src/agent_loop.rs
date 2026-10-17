@@ -14,7 +14,7 @@ use conf::{AgentKind, Settings};
 use logger::{DoubleLogger, Logger};
 use tools::{ToolRegistry, ToolsContext};
 
-use crate::agents::{Agent, GoogleAgent, XaiAgent};
+use crate::agents::{Agent, ClaudeAgent, GoogleAgent, XaiAgent};
 
 /// Drive one harness session.
 pub struct AgentLoop {
@@ -45,6 +45,9 @@ impl AgentLoop {
             }
             AgentKind::Google { .. } => {
                 Box::new(GoogleAgent::new(registry, logger.clone(), &settings.agent)?)
+            }
+            AgentKind::Claude { .. } => {
+                Box::new(ClaudeAgent::new(registry, logger.clone(), &settings.agent)?)
             }
         };
         Ok(Self {

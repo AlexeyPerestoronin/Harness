@@ -33,6 +33,11 @@ pub enum AgentKind {
         /// API model id, e.g. `gemini-3.8-flash`.
         api_model: String,
     },
+    /// Anthropic Messages API (`claude-*`).
+    Claude {
+        /// API model id, e.g. `claude-sonnet-5-5`.
+        api_model: String,
+    },
 }
 
 /// Fully resolved harness configuration.
@@ -53,7 +58,7 @@ pub struct Settings {
 /// Model identity, resolved API key and session limits.
 #[derive(Debug, Clone)]
 pub struct AgentSettings {
-    /// Vendor string from the model file (`SpaceXAI` / `GoogleAI`).
+    /// Vendor string from the model file (`SpaceXAI` / `GoogleAI` / `Claude`).
     pub vendor: String,
     /// Display name from the model file (`Grok 4.6`, ...).
     pub name: String,

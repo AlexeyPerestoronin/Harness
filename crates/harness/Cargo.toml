@@ -2,7 +2,7 @@
 name = "harness"
 version.workspace = true
 edition.workspace = true
-description = "Native harness.exe: CLI, agent loop, xAI and Google HTTP agents."
+description = "Native harness.exe: CLI, agent loop, xAI, Google and Claude HTTP agents."
 
 [dependencies]
 # Load and validate harness.json5 / model files; generate --conf-new templates.
@@ -14,7 +14,7 @@ tools = { path = "../tools" }
 # JSON for dump files and HTTP bodies.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Blocking HTTP client for xAI and Google REST APIs.
+# Blocking HTTP client for xAI, Google and Claude REST APIs.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 # Conversation / chat identifiers for xAI.
 uuid = { version = "1", features = ["v4"] }
