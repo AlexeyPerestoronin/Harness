@@ -449,14 +449,4 @@ mod tests {
         let p = parse_xai_response(body).unwrap();
         assert!((p.cost_usd - 0.03).abs() < 1e-9);
     }
-
-    #[test]
-    #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
-    fn live_availability() {
-        let (settings, logger, tools) = super::super::live_support::prepare("grok-4.6.json5");
-        let mut agent = XaiAgent::new(tools, logger, &settings).unwrap();
-        let result = agent.iteration(Some(super::super::live_support::PROMPT));
-        assert!(result.is_ok(), "xAI live request failed: {:?}", result.err());
-        assert!(agent.consumed_tokens() > 0);
-    }
 }

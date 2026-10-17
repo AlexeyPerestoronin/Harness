@@ -18,6 +18,8 @@ use super::{claude_tools, invoke_tool, Agent, UsageStats};
 const CLAUDE_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: i64 = 8192;
+/// Output cap for `claude-sonnet-5-5` (`max_tokens` is not the session token-limit).
+const MODEL_MAX_OUTPUT_TOKENS: i64 = 128_000;
 
 /// Claude agent (vendor `Claude`).
 pub struct ClaudeAgent {
@@ -64,11 +66,7 @@ impl ClaudeAgent {
     }
 
     fn max_tokens(&self) -> i64 {
-        if self.token_limit > 0 {
-            self.token_limit
-        } else {
-            DEFAULT_MAX_TOKENS
-        }
+        claude_max_output_tokens(self.token_limit)
     }
 
     fn execute_request(&mut self) -> Result<ParsedClaude, String> {
@@ -295,6 +293,16 @@ fn parse_claude_response(text: &str) -> Result<ParsedClaude, String> {
     })
 }
 
+/// Anthropic `max_tokens` is an output cap, not the session token budget.
+fn claude_max_output_tokens(token_limit: i64) -> i64 {
+    let requested = if token_limit > 0 {
+        token_limit
+    } else {
+        DEFAULT_MAX_TOKENS
+    };
+    requested.min(MODEL_MAX_OUTPUT_TOKENS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,17 +358,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
-    fn live_availability() {
-        let (settings, logger, tools) =
-            super::super::live_support::prepare("claude-sonnet-5-5.json5");
-        let mut agent = ClaudeAgent::new(tools, logger, &settings).unwrap();
-        let result = agent.iteration(Some(super::super::live_support::PROMPT));
-        assert!(
-            result.is_ok(),
-            "Claude live request failed: {:?}",
-            result.err()
-        );
-        assert!(agent.consumed_tokens() > 0);
+    fn max_tokens_caps_session_limit_to_model_output() {
+        assert_eq!(claude_max_output_tokens(500_000), MODEL_MAX_OUTPUT_TOKENS);
+        assert_eq!(claude_max_output_tokens(32_000), 32_000);
+        assert_eq!(claude_max_output_tokens(128_000), MODEL_MAX_OUTPUT_TOKENS);
+        assert_eq!(claude_max_output_tokens(-1), DEFAULT_MAX_TOKENS);
+        assert_eq!(claude_max_output_tokens(0), DEFAULT_MAX_TOKENS);
     }
 }

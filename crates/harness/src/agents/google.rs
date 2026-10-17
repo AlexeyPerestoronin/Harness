@@ -397,19 +397,4 @@ mod tests {
         assert_eq!(back.usage_stats.requests, 2);
         assert_eq!(back.history.len(), 1);
     }
-
-    #[test]
-    #[ignore = "live API; cargo test -p harness -- --ignored --nocapture --test-threads=1"]
-    fn live_availability() {
-        let (settings, logger, tools) =
-            super::super::live_support::prepare("gemini-3.8-flash.json5");
-        let mut agent = GoogleAgent::new(tools, logger, &settings).unwrap();
-        let result = agent.iteration(Some(super::super::live_support::PROMPT));
-        assert!(
-            result.is_ok(),
-            "Google live request failed: {:?}",
-            result.err()
-        );
-        assert!(agent.consumed_tokens() > 0);
-    }
 }

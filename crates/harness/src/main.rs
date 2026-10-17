@@ -6,6 +6,8 @@
 mod agent_loop;
 mod agents;
 mod cli;
+#[cfg(test)]
+mod agents_live_tests;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

@@ -1,17 +1,25 @@
 {
-    "cwd": "C:/MyLife/Harness",
+    // Workspace of the agent (tools, logs, invoke). Live tests replace `<cwd>`.
+    "cwd": "<cwd>",
+    // Paths used by the loop. `log-folder` is relative to `cwd`.
     "paths": {
-        "log-folder": ".log"
+        // Live sessions go under `.log/live/`, separate from ordinary runs.
+        "log-folder": ".log/live"
     },
+    // Model file, confirmation mode and session limits.
     "agent-setting": {
-        "config": "<target >",
-        "mode": "safe",
+        // Path to the model json5. Live tests replace `<target>` with an absolute model path.
+        "config": "<target>",
+        // auto-accept — do not block the test on limit confirmation.
+        "mode": "auto-accept",
+        // Session token limit. `-1` = unlimited. Also used as Claude output `max_tokens` (capped at 128000).
         "token-limit": 32000,
+        // Session iteration limit. `-1` = unlimited.
         "iteration-limit": 10,
+        // Session USD limit. `-1` = unlimited.
         "USD-limit": 0.1
     },
-    // Enabled tool modules. Key = module name (`crates/tools/src/<name>.rs`).
-    // Missing key → module is not registered. Unknown key → startup error.
+    // Enabled tool modules. Only fs + git: edit `test-file.txt` and revert.
     "tools": {
         "fs": {
             "available-dirs": [
@@ -19,22 +27,12 @@
             "available-file-extensions": [
             ],
             "extra-scope": [
-                "w:crates/harness/src/agents/live_tests/test-file.txt"
+                "w:<test-file>"
             ]
         },
         "git": {
             "executable": "git",
             "execution-limit": 120
-        },
-        "terminal": {
-            "cwd-list": [
-                "."
-            ],
-            "available-commands": [
-            ],
-            "command-execution-limit": 180,
-            "invoke-execution-limit": 180
-        },
-        "user": {}
+        }
     }
 }
