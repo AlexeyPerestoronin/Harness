@@ -51,11 +51,6 @@
 3. Обновить `crates/harness/Cargo.toml` description (сейчас только xAI и Google).
 4. Комментарий `crates/harness/src/agents/mod.rs` («xAI и Google») расширить.
 
-### 5. Документация
-Дописать поддержку Claude в `README.en.md` и `README.ru.md` (раздел агентов / model file): vendor `Claude`, name `Claude Sonnet 5.5`, файл `agents/claude-sonnet-5-5.json5`. Не описывать внутренности HTTP, кроме того, что это отдельный вендор.
-
-Не добавлять Claude в `--conf-new` как единственную модель по умолчанию (плейсхолдер `grok-4.6.json5` оставить).
-
 ## Scope
 - `crates/conf/src/types.rs`
 - `crates/conf/src/load.rs`

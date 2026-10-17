@@ -1,0 +1,27 @@
+{
+    "version": "2.0.0",
+    "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+    },
+    "problemMatcher": [],
+    "tasks": [
+        {
+            "label": "Run new AI hurness loop",
+            "type": "shell",
+            "group": "none",
+            "command": "${workspaceFolder}/harness.exe",
+            "args": [
+                "--conf", "${file}",
+                "--prompt", "${input:user_prompt}",
+            ],
+        },
+    ],
+    "inputs": [
+        {
+            "id": "user_prompt",
+            "type": "promptString",
+            "description": "promptString",
+        }
+    ]
+}

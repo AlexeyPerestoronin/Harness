@@ -2,8 +2,9 @@
 target/
 dist/
 
-#API_KEYs
+#API_KEYs with agents
 API_KEY*
+agent-*.json5
 
 # Logs
 .log
