@@ -3,7 +3,8 @@
 //! Conversation state is a local message list. The `x-grok-conv-id` header is
 //! sent on every request. Token accounting: `input + output - cached`.
 
-use std::path::Path;
+use std::time::Duration;
+use std::{path::Path, thread};
 use std::sync::Arc;
 
 use logger::Logger;
@@ -65,6 +66,11 @@ impl XaiAgent {
         })
     }
 
+    fn wait_rate_limit(&mut self) {
+        // TODO: need to implement RPM limitation for xAI
+        thread::sleep(Duration::from_secs_f64(15f64));
+    }
+
     fn execute_request(&mut self) -> Result<ParsedXai, String> {
         let tools = openai_tools(&self.tools.list());
         let body = json!({
@@ -73,29 +79,43 @@ impl XaiAgent {
             "tools": tools,
             "conversation_id": self.chat_id,
         });
-        let response = self
-            .client
-            .post(XAI_URL)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("x-grok-conv-id", &self.conv_id)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .map_err(|e| format!("xAI request failed: {e}"))?;
-        let status = response.status();
-        let text = response
-            .text()
-            .map_err(|e| format!("xAI read body failed: {e}"))?;
-        if !status.is_success() {
-            return Err(format!("xAI HTTP {status}: {text}"));
+        let mut last_err = "Request failed after max retries".to_string();
+        for attempt in 1..=24 {
+            let response = self
+                .client
+                .post(XAI_URL)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("x-grok-conv-id", &self.conv_id)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .map_err(|e| {
+                    format!("⚠️ {attempt}-attempt of xAI request failed: {e}")
+                });
+            if let Err(error) = &response {
+                last_err = error.clone();
+                self.logger.log_line(error.as_str());
+                self.wait_rate_limit();
+                continue;
+            }
+            let response = response?;
+            let status = response.status();
+            let text = response
+                .text()
+                .map_err(|e| format!("xAI read body failed: {e}"))?;
+            if !status.is_success() {
+                return Err(format!("xAI HTTP {status}: {text}"));
+            }
+            let parsed = parse_xai_response(&text)?;
+            self.usage.requests += 1;
+            self.usage.input_tokens += parsed.prompt_tokens;
+            self.usage.output_tokens += parsed.completion_tokens;
+            self.usage.cached_tokens += parsed.cached_tokens;
+            self.usage.total_cost_usd += parsed.cost_usd;
+            return Ok(parsed);
         }
-        let parsed = parse_xai_response(&text)?;
-        self.usage.requests += 1;
-        self.usage.input_tokens += parsed.prompt_tokens;
-        self.usage.output_tokens += parsed.completion_tokens;
-        self.usage.cached_tokens += parsed.cached_tokens;
-        self.usage.total_cost_usd += parsed.cost_usd;
-        Ok(parsed)
+        self.logger.log_line("❌ xAI requesting was failed!");
+        Err(last_err)
     }
 
     fn handle_tool_calls(&mut self, calls: &[XaiToolCall]) {
