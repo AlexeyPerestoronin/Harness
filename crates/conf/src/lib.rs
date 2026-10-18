@@ -9,6 +9,7 @@ pub mod str;
 mod error;
 mod load;
 mod template;
+mod vars;
 mod types;
 
 pub use error::ConfError;
@@ -95,6 +96,7 @@ mod tests {
     fn keys_match_schema() {
         assert_eq!(keys::CWD, "cwd");
         assert_eq!(keys::API_KEY, "api-key");
+        assert_eq!(keys::VARS, "vars");
         assert_eq!(keys::TOOLS, "tools");
         assert_eq!(keys::TOOL_FS, "fs");
         assert_eq!(keys::TOOL_GIT, "git");
@@ -379,6 +381,115 @@ mod tests {
         write(&conf, &harness_body("g.json5", "{}"));
         let err = load(&conf).unwrap_err().to_string();
         assert!(err.contains(keys::RPM), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_harness_and_model_with_vars() {
+        let dir = tmp_dir("vars-ok");
+        write(
+            &dir.join("grok.json5"),
+            r#"{
+            "vars": {
+                "key": "literal-key",
+                "iter": 50
+            },
+            "vendor": "SpaceXAI",
+            "name": "Grok 4.6",
+            "api-key": "${vars:key}",
+            "token-limit": 500000,
+            "iteration-limit": ${vars:iter},
+            "USD-limit": -1
+        }"#,
+        );
+        let conf = dir.join("harness.json5");
+        write(
+            &conf,
+            r#"{
+            "vars": {
+                "workspace": "C:/workspace",
+                "tokens": 128000,
+                "usd": 0.5
+            },
+            "cwd": "${vars:workspace}",
+            "paths": { "log-folder": ".log" },
+            "agent-setting": {
+                "config": "grok.json5",
+                "mode": "safe",
+                "token-limit": ${vars:tokens},
+                "iteration-limit": 50,
+                "USD-limit": ${vars:usd}
+            },
+            "tools": {}
+        }"#,
+        );
+        let settings = load(&conf).unwrap();
+        assert_eq!(settings.cwd, PathBuf::from("C:/workspace"));
+        assert_eq!(settings.agent.api_key, "literal-key");
+        assert_eq!(settings.agent.token_limit, 128000);
+        assert_eq!(settings.agent.iteration_limit, 50);
+        assert!((settings.agent.usd_limit - 0.5).abs() < f64::EPSILON);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vars_do_not_leak_from_model_to_harness() {
+        let dir = tmp_dir("vars-leak-h");
+        write(
+            &dir.join("grok.json5"),
+            &format!(
+                r#"{{
+            "vars": {{ "workspace": "C:/from-model" }},
+            {body}
+        }}"#,
+                body = model_body("literal-key").trim().trim_start_matches('{').trim_end_matches('}'),
+            ),
+        );
+        let conf = dir.join("harness.json5");
+        write(
+            &conf,
+            &harness_body("grok.json5", "{}").replace(
+                "\"C:/workspace\"",
+                "\"${vars:workspace}\"",
+            ),
+        );
+        let err = load(&conf).unwrap_err().to_string();
+        assert!(
+            err.contains("variable 'workspace' is being used but not defined"),
+            "{err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vars_do_not_leak_from_harness_to_model() {
+        let dir = tmp_dir("vars-leak-m");
+        write(
+            &dir.join("grok.json5"),
+            &model_body("${vars:key}"),
+        );
+        let conf = dir.join("harness.json5");
+        write(
+            &conf,
+            r#"{
+            "vars": { "key": "literal-key" },
+            "cwd": "C:/workspace",
+            "paths": { "log-folder": ".log" },
+            "agent-setting": {
+                "config": "grok.json5",
+                "mode": "safe",
+                "token-limit": 128000,
+                "iteration-limit": 50,
+                "USD-limit": 0.5
+            },
+            "tools": {}
+        }"#,
+        );
+        let err = load(&conf).unwrap_err().to_string();
+        assert!(
+            err.contains("variable 'key' is being used but not defined"),
+            "{err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

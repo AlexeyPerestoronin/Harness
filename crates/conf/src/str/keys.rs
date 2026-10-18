@@ -17,6 +17,8 @@ pub const LOG_FOLDER: &str = "log-folder";
 pub const AGENT_SETTING: &str = "agent-setting";
 /// Object whose keys are tool-module names.
 pub const TOOLS: &str = "tools";
+/// Optional named values substituted before json5 parsing.
+pub const VARS: &str = "vars";
 
 // ---------------------------------------------------------------------------
 // agent-setting

@@ -25,6 +25,7 @@ pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
             conf_path.display()
         ))
     })?;
+    let text = crate::vars::substitute(&text, &conf_path.display().to_string())?;
     let root: Value = json5::from_str(&text)?;
     let obj = expect_object(&root, &conf_path.display().to_string())?;
     let conf_dir = conf_path
@@ -95,6 +96,7 @@ fn read_model_object(
             model_path.display()
         ))
     })?;
+    let model_text = crate::vars::substitute(&model_text, &model_path.display().to_string())?;
     let model_root: Value = json5::from_str(&model_text)?;
     expect_object(&model_root, &model_path.display().to_string()).cloned()
 }
