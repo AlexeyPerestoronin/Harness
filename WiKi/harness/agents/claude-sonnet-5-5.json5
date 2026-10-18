@@ -1,0 +1,8 @@
+{
+    "vendor": "Claude",
+    "name": "Claude Sonnet 5.5",
+    "api-key": "API_KEY_CLAUDE",
+    "token-limit": 500000,
+    "iteration-limit": -1,
+    "USD-limit": -1,
+}
