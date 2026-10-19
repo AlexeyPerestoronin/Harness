@@ -1,0 +1,111 @@
+{
+    // Edit only this section.
+    // Named values here are substituted into the rest of this file.
+    "vars": {
+        // Agent workspace (tools, logs, invoke). Absolute path, or relative to the process cwd.
+        "workspace": "<workspace path>",
+        // Path to the agent json5 file (a file, not a folder; folder support is a later task).
+        // Relative paths are resolved against the directory of this conf file.
+        "agent-config": "grok-4.6.json5",
+        // Confirmation mode: "safe" (ask when a limit is exceeded) or "auto-accept" (log and continue).
+        "mode": "safe",
+        // Session token limit. Number, not a string. -1 = unlimited.
+        "token-limit": 128000,
+        // Session iteration limit. Number, not a string. -1 = unlimited. Fires on iteration limit+1.
+        "iteration-limit": 50,
+        // Session USD limit. Number, not a string. -1 = unlimited.
+        "usd-limit": 0.5,
+        // Log folder name, relative to cwd. Session logs go to
+        // <cwd>/<log-folder>/<YYYY-MM-DD HH-MM>_<vendor>_<model>/.
+        "log-folder": ".log",
+        // Working directory for fs tools and run_shell. Absolute, or relative to the process cwd.
+        "work-dir": "<work directory>",
+        // Path or name of the git binary. Required. The code never falls back to "git".
+        "git-executable": "path to git-executable file",
+        // Timeout in seconds for git subprocesses. Number, not a string.
+        "execution-limit": 120,
+        // Timeout in seconds for run_shell. Number, not a string.
+        "command-execution-limit": 120,
+        // Timeout in seconds for run_invoke. Number, not a string.
+        "invoke-execution-limit": 120
+    },
+    // Workspace of the agent (tools, logs, invoke). Must be set explicitly.
+    "cwd": "${vars:workspace}",
+    // Paths used by the loop. `log-folder` is relative to `cwd`.
+    "paths": {
+        // Session logs go to `<cwd>/<log-folder>/<YYYY-MM-DD HH-MM>_<vendor>_<model>/`.
+        "log-folder": "${vars:log-folder}"
+    },
+    // Model file, confirmation mode and session limits.
+    "agent-setting": {
+        // Path to the agent json5 file (a file, not a folder; folder support is a later task).
+        // Relative to the directory of this conf file.
+        "config": "${vars:agent-config}",
+        // "safe" — confirm when a limit is exceeded; "auto-accept" — log and continue.
+        "mode": "${vars:mode}",
+        // Session token limit. `-1` = unlimited. Required (not taken from the model file).
+        "token-limit": ${vars:token-limit},
+        // Session iteration limit. `-1` = unlimited. Fires on iteration limit+1.
+        "iteration-limit": ${vars:iteration-limit},
+        // Session USD limit. `-1` = unlimited.
+        "USD-limit": ${vars:usd-limit}
+    },
+    // Enabled tool modules. Key = module name (`crates/tools/src/<name>.rs`).
+    // Missing key → module is not registered. Unknown key → startup error.
+    "tools": {
+        // Filesystem tools: read/write/create/remove/move file and folder, list_folder;
+        // find_str, find_str_by_regex, find_file_by_str, find_files_by_regex;
+        // list_available_file_extension, list_available_r_dir, list_available_w_dir,
+        // list_available_r_file, list_available_w_file.
+        "fs": {
+            // Directory allow-list. Prefix `r:` (read) or `w:` (write; implies read). Match by abspath prefix.
+            "available-dirs": [
+                "w:${vars:work-dir}"
+            ],
+            // Allowed extensions including the dot (".md"). Empty list = any extension.
+            "available-file-extensions": [
+            ],
+            // Exact-file allow-list outside `available-dirs`. Prefixes `r:` / `w:`.
+            "available-files": [
+            ],
+            // Directories skipped by fs tools (build dirs, logs). Empty list is allowed.
+            // No `r:` / `w:` prefixes (those mark access mode and are meaningless for a denylist).
+            // Relative paths are resolved against the process cwd (not settings.cwd).
+            // An entry that coincides with or contains an `available-*` path is a load error.
+            "deprecated-dirs": [
+                ".git",
+                "target"
+            ],
+            // Files skipped by fs tools. Empty list is allowed.
+            // No `r:` / `w:` prefixes. Relative paths are resolved against the process cwd.
+            // Intersection with `available-files` is a load error.
+            "deprecated-files": [
+            ]
+        },
+        // Git tools: is_file_under_git, get_file_diff, apply_diff_patch, discard_file_changes.
+        "git": {
+            // Path or name of the git binary. Required. The code never falls back to "git".
+            "executable": "${vars:git-executable}",
+            // Timeout in seconds for git subprocesses.
+            "execution-limit": ${vars:execution-limit}
+        },
+        // Shell tools: run_shell, run_invoke, list_available_shell_commands.
+        "terminal": {
+            // Allowed cwd values for run_shell (abspath prefix match), separate from `available-dirs`.
+            "cwd-list": [
+                "${vars:work-dir}"
+            ],
+            // Command names without r:/w: prefixes. run_invoke does not use this list.
+            "available-commands": [
+                "findstr",
+                "cargo"
+            ],
+            // Timeout in seconds for run_shell. Required if `terminal` is enabled.
+            "command-execution-limit": ${vars:command-execution-limit},
+            // Timeout in seconds for run_invoke. Required if `terminal` is enabled.
+            "invoke-execution-limit": ${vars:invoke-execution-limit}
+        },
+        // User interaction: ask_user, request_*_access_for, request_command_shell_execution.
+        "user": {}
+    }
+}

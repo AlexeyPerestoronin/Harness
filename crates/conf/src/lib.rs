@@ -2,7 +2,7 @@
 //!
 //! This is the only crate allowed to open `harness.json5` and nested model
 //! files. Callers receive typed [`Settings`] and never parse json5 themselves.
-//! All json5 keys and defaults live in [`str::keys`].
+//! All json5 keys live in [`str::keys`]. The `--conf-new` template is a file.
 
 pub mod str;
 
@@ -117,6 +117,11 @@ mod tests {
         let result = load(&conf);
         let _ = fs::remove_dir_all(&dir);
         result
+    }
+
+    fn parse_substituted_template() -> serde_json::Value {
+        let subst = crate::vars::substitute(&template_text(), "settings-template.json5").unwrap();
+        json5::from_str(&subst).expect("substituted template must be valid json5")
     }
 
     #[test]
@@ -387,14 +392,14 @@ mod tests {
         assert!(text.contains(&format!("\"{}\"", keys::DEPRECATED_DIRS)));
         assert!(text.contains(&format!("\"{}\"", keys::DEPRECATED_FILES)));
         assert!(!text.contains(&format!("\"{}\"", keys::EXTRA_SCOPE)));
-        json5::from_str::<serde_json::Value>(&text).expect("template must be valid json5");
         assert!(!text.contains("\"search\":"));
         assert!(!text.contains("\"meta\":"));
         assert!(text.contains("find_str"));
         assert!(text.contains("list_available_shell_commands"));
         assert!(text.contains("//"));
-        assert!(text.contains(keys::PLACEHOLDER_GIT_EXECUTABLE));
-        assert!(text.contains(keys::PLACEHOLDER_CWD));
+        assert!(text.contains("Edit only this section"));
+        assert!(text.contains("${vars:"));
+        assert!(text.find(&format!("\"{}\"", keys::VARS)).unwrap() < text.find(&format!("\"{}\"", keys::CWD)).unwrap());
         let err = write_new_conf(&path).unwrap_err().to_string();
         assert!(err.contains("already exists"), "{err}");
         let _ = fs::remove_dir_all(&dir);
@@ -406,6 +411,124 @@ mod tests {
         let path = dir.join("a").join("b").join("c.json5");
         write_new_conf(&path).unwrap();
         assert!(path.is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn template_substitutes_to_settings_object() {
+        let value = parse_substituted_template();
+        let obj = value.as_object().expect("root object");
+        for key in [
+            keys::VARS,
+            keys::CWD,
+            keys::PATHS,
+            keys::AGENT_SETTING,
+            keys::TOOLS,
+        ] {
+            assert!(obj.contains_key(key), "missing top-level key {key}");
+        }
+    }
+
+    #[test]
+    fn template_vars_are_used_and_declared() {
+        let text = template_text();
+        let value = parse_substituted_template();
+        let vars = value[keys::VARS].as_object().expect("vars object");
+        assert!(!vars.is_empty());
+        for name in vars.keys() {
+            let needle = format!("${{vars:{name}}}");
+            assert!(
+                text.contains(&needle),
+                "variable '{name}' is defined but not used"
+            );
+        }
+        let prefix = "${vars:";
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find(prefix) {
+            let after = &rest[i + prefix.len()..];
+            let end = after.find('}').expect("closing brace for ${vars:}");
+            let name = &after[..end];
+            assert!(
+                vars.contains_key(name),
+                "variable '{name}' is being used but not defined"
+            );
+            rest = &after[end..];
+        }
+    }
+
+    #[test]
+    fn template_contains_loader_keys() {
+        let text = template_text();
+        for key in [
+            keys::CWD,
+            keys::PATHS,
+            keys::LOG_FOLDER,
+            keys::AGENT_SETTING,
+            keys::CONFIG,
+            keys::MODE,
+            keys::TOKEN_LIMIT,
+            keys::ITERATION_LIMIT,
+            keys::USD_LIMIT,
+            keys::TOOLS,
+            keys::TOOL_FS,
+            keys::TOOL_GIT,
+            keys::TOOL_TERMINAL,
+            keys::TOOL_USER,
+            keys::AVAILABLE_DIRS,
+            keys::AVAILABLE_FILE_EXTENSIONS,
+            keys::AVAILABLE_FILES,
+            keys::DEPRECATED_DIRS,
+            keys::DEPRECATED_FILES,
+            keys::EXECUTABLE,
+            keys::EXECUTION_LIMIT,
+            keys::CWD_LIST,
+            keys::AVAILABLE_COMMANDS,
+            keys::COMMAND_EXECUTION_LIMIT,
+            keys::INVOKE_EXECUTION_LIMIT,
+        ] {
+            assert!(
+                text.contains(&format!("\"{key}\"")),
+                "template is missing key \"{key}\""
+            );
+        }
+    }
+
+    #[test]
+    fn template_loads_after_filling_vars() {
+        let dir = tmp_dir("template-load");
+        let workspace = dir.to_string_lossy().replace('\\', "/");
+        write(&dir.join("grok-4.6.json5"), &model_body("literal-key"));
+        let text = template_text()
+            .replace("<workspace path>", &workspace)
+            .replace("path to git-executable file", "git")
+            .replace("<work directory>", &workspace);
+        let conf = dir.join("harness.json5");
+        write(&conf, &text);
+        let settings = load(&conf).unwrap();
+        assert_eq!(settings.cwd, PathBuf::from(&workspace));
+        assert_eq!(settings.agent.api_key, "literal-key");
+        assert_eq!(settings.agent.token_limit, 128000);
+        assert_eq!(settings.agent.iteration_limit, 50);
+        assert!((settings.agent.usd_limit - 0.5).abs() < f64::EPSILON);
+        assert!(settings.agent.mode.is_safe());
+        assert!(settings.tools.fs.is_some());
+        assert!(settings.tools.git.is_some());
+        assert!(settings.tools.terminal.is_some());
+        assert!(settings.tools.user.is_some());
+        let fs = settings.tools.fs.as_ref().unwrap();
+        assert_eq!(fs.available_dirs, vec![format!("w:{workspace}")]);
+        assert!(fs.available_file_extensions.is_empty());
+        assert!(fs.available_files.is_empty());
+        assert_eq!(
+            fs.deprecated_dirs,
+            vec![".git".to_string(), "target".to_string()]
+        );
+        assert!(fs.deprecated_files.is_empty());
+        assert_eq!(settings.tools.git.as_ref().unwrap().executable, "git");
+        let term = settings.tools.terminal.as_ref().unwrap();
+        assert_eq!(term.cwd_list, vec![workspace.clone()]);
+        assert_eq!(term.command_execution_limit, 120);
+        assert_eq!(term.invoke_execution_limit, 120);
         let _ = fs::remove_dir_all(&dir);
     }
 

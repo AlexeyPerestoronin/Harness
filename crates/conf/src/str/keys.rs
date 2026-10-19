@@ -1,7 +1,8 @@
-//! All JSON5 keys and default / placeholder values used by the harness conf crate.
+//! All JSON5 keys and load-time default values used by the harness conf crate.
 //!
-//! Changing a json5 field name means editing this module only. Loaders, the
-//! `--conf-new` template and tests must read names from these constants.
+//! Changing a json5 field name means editing this module only. Loaders and
+//! tests must read names from these constants. The `--conf-new` template lives
+//! in `settings-template.json5` and is checked against these keys in tests.
 
 // ---------------------------------------------------------------------------
 // Root object of harness.json5
@@ -110,33 +111,8 @@ pub const COMMAND_EXECUTION_LIMIT: &str = "command-execution-limit";
 pub const INVOKE_EXECUTION_LIMIT: &str = "invoke-execution-limit";
 
 // ---------------------------------------------------------------------------
-// Defaults used by `--conf-new` (and log-folder fallback on load)
+// Load-time defaults
 // ---------------------------------------------------------------------------
 
 /// Default `paths.log-folder`.
 pub const DEFAULT_LOG_FOLDER: &str = ".log";
-/// Default session token-limit written into the template.
-pub const DEFAULT_TOKEN_LIMIT: i64 = 128000;
-/// Default session iteration-limit written into the template.
-pub const DEFAULT_ITERATION_LIMIT: i64 = 50;
-/// Default session USD-limit written into the template.
-pub const DEFAULT_USD_LIMIT: f64 = 0.5;
-/// Default subprocess timeout (seconds) written into the template.
-pub const DEFAULT_EXECUTION_LIMIT: u64 = 120;
-
-// ---------------------------------------------------------------------------
-// Placeholders for fields the user must fill in by hand
-// ---------------------------------------------------------------------------
-
-/// Stub for `cwd`.
-pub const PLACEHOLDER_CWD: &str = "<workspace path>";
-/// Stub for `agent-setting.config`.
-pub const PLACEHOLDER_MODEL_CONFIG: &str = "grok-4.6.json5";
-/// Stub for `tools.git.executable`.
-pub const PLACEHOLDER_GIT_EXECUTABLE: &str = "path to git-executable file";
-/// Stub for model `api-key`.
-pub const PLACEHOLDER_API_KEY: &str = "api-key or path to file with api-key";
-/// Stub for a directory in allow-lists / cwd-list.
-pub const PLACEHOLDER_DIR: &str = "<absolute or workspace-relative directory>";
-/// Stub for a file in available-files.
-pub const PLACEHOLDER_FILE: &str = "<absolute or workspace-relative file>";
