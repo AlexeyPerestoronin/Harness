@@ -159,10 +159,7 @@ impl ToolRegistry {
 
     /// Descriptors of every enabled module, in registration order.
     pub fn list(&self) -> Vec<ToolDescriptor> {
-        self.modules
-            .iter()
-            .flat_map(|m| m.descriptors())
-            .collect()
+        self.modules.iter().flat_map(|m| m.descriptors()).collect()
     }
 
     /// Dispatch `name` to the owning module and log the result like Python `DefaultTools.call`.
@@ -288,10 +285,7 @@ mod tests {
         });
         let _reg = ToolRegistry::build(&settings, ctx());
         let cmd = git::git_command("C:/custom/git.exe", &["status"]);
-        assert_eq!(
-            cmd.get_program(),
-            std::ffi::OsStr::new("C:/custom/git.exe")
-        );
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("C:/custom/git.exe"));
     }
 
     #[test]

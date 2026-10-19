@@ -60,7 +60,9 @@ impl GitModule {
             "is_file_under_git" => Ok(CallResult::plain(
                 self.is_file_under_git(&arg_str(args, "path")?)?,
             )),
-            "get_file_diff" => Ok(CallResult::plain(self.get_file_diff(&arg_str(args, "path")?)?)),
+            "get_file_diff" => Ok(CallResult::plain(
+                self.get_file_diff(&arg_str(args, "path")?)?,
+            )),
             "discard_file_changes" => Ok(CallResult::plain(
                 self.discard_file_changes(&arg_str(args, "path")?)?,
             )),
@@ -78,7 +80,11 @@ impl GitModule {
     fn is_file_under_git(&self, path: &str) -> Result<String, String> {
         (|| {
             self.check(path, 'r')?;
-            let result = self.run_git(&["ls-files", "--error-unmatch", "--", path], &self.cwd, None)?;
+            let result = self.run_git(
+                &["ls-files", "--error-unmatch", "--", path],
+                &self.cwd,
+                None,
+            )?;
             if result.status_ok {
                 Ok(format!("file '{path}' is under git"))
             } else {
@@ -320,7 +326,10 @@ diff --git a/app.py b/app.py
 -a
 +b
 ";
-        assert_eq!(extract_patch_target_paths(patch), vec!["app.py".to_string()]);
+        assert_eq!(
+            extract_patch_target_paths(patch),
+            vec!["app.py".to_string()]
+        );
     }
 
     #[test]
@@ -357,7 +366,10 @@ diff --git a/bar.txt b/bar.txt
 
     #[test]
     fn descriptors_registered() {
-        let names: Vec<_> = GitModule::descriptors().into_iter().map(|d| d.name).collect();
+        let names: Vec<_> = GitModule::descriptors()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         for n in [
             "is_file_under_git",
             "apply_diff_patch",

@@ -47,9 +47,21 @@ impl TerminalModule {
     /// JSON Schema descriptors for the terminal tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("run_shell", "Run a command.", json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]})),
-            desc("run_invoke", "Run an invoke command.", json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]})),
-            desc("list_available_shell_commands", "List of available shell commands.", json!({})),
+            desc(
+                "run_shell",
+                "Run a command.",
+                json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]}),
+            ),
+            desc(
+                "run_invoke",
+                "Run an invoke command.",
+                json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}),
+            ),
+            desc(
+                "list_available_shell_commands",
+                "List of available shell commands.",
+                json!({}),
+            ),
         ]
     }
 
@@ -61,7 +73,9 @@ impl TerminalModule {
                 &arg_str(args, "command")?,
                 &arg_str_or_empty(args, "arguments"),
             )?)),
-            "run_invoke" => Ok(CallResult::plain(self.run_invoke(&arg_str(args, "command")?)?)),
+            "run_invoke" => Ok(CallResult::plain(
+                self.run_invoke(&arg_str(args, "command")?)?,
+            )),
             "list_available_shell_commands" => Ok(CallResult::plain(format!(
                 "available: {:?}",
                 self.available_commands()
@@ -172,10 +186,7 @@ mod tests {
         let err = m
             .call(
                 "run_shell",
-                &args(&[
-                    ("cwd", &outside.to_string_lossy()),
-                    ("command", "echo"),
-                ]),
+                &args(&[("cwd", &outside.to_string_lossy()), ("command", "echo")]),
             )
             .unwrap_err();
         assert!(err.contains("cwd is denied"), "{err}");
@@ -194,7 +205,10 @@ mod tests {
         );
         // `arguments` omitted — treated as "".
         let mut map = Map::new();
-        map.insert("cwd".into(), Value::String(root.to_string_lossy().into_owned()));
+        map.insert(
+            "cwd".into(),
+            Value::String(root.to_string_lossy().into_owned()),
+        );
         map.insert("command".into(), Value::String("echo".into()));
         let result = m.call("run_shell", &map);
         assert!(result.is_ok(), "{result:?}");
@@ -206,7 +220,11 @@ mod tests {
         let cwd = PathBuf::from("/ws");
         let p = invoke_python(&cwd);
         #[cfg(windows)]
-        assert!(p.ends_with(Path::new(".venv\\Scripts\\python.exe")) || p.ends_with(".venv/Scripts/python.exe") || p.components().any(|c| c.as_os_str() == "python.exe"));
+        assert!(
+            p.ends_with(Path::new(".venv\\Scripts\\python.exe"))
+                || p.ends_with(".venv/Scripts/python.exe")
+                || p.components().any(|c| c.as_os_str() == "python.exe")
+        );
         #[cfg(not(windows))]
         assert!(p.ends_with(".venv/bin/python"));
     }
@@ -221,7 +239,9 @@ mod tests {
             5,
             5,
         );
-        let out = m.call("list_available_shell_commands", &Map::new()).unwrap();
+        let out = m
+            .call("list_available_shell_commands", &Map::new())
+            .unwrap();
         assert!(out.output.contains("findstr"), "{}", out.output);
         assert!(out.output.contains("cargo"), "{}", out.output);
         let _ = fs::remove_dir_all(&root);

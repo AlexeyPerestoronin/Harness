@@ -48,7 +48,9 @@ pub(super) fn find_file_by_str(
     root: &str,
     string: &str,
 ) -> Result<String, String> {
-    find_files_by_name(sandbox, root, "find_file_by_str", |name| name.contains(string))
+    find_files_by_name(sandbox, root, "find_file_by_str", |name| {
+        name.contains(string)
+    })
 }
 
 pub(super) fn find_files_by_regex(
@@ -144,10 +146,7 @@ fn scan_files(
     .map_err(|e| format!("cannot {title} → {e}"))
 }
 
-fn iter_files_for_search(
-    sandbox: &Arc<Mutex<Sandbox>>,
-    root: &str,
-) -> Result<Vec<String>, String> {
+fn iter_files_for_search(sandbox: &Arc<Mutex<Sandbox>>, root: &str) -> Result<Vec<String>, String> {
     {
         let sb = sandbox.lock().map_err(|e| e.to_string())?;
         sb.check_access(root, 'r')?;
@@ -190,11 +189,21 @@ fn collect_files(
     for f in files {
         let s = f.to_string_lossy().into_owned();
         let sb = sandbox.lock().map_err(|e| e.to_string())?;
+        if sb.is_deprecated(&s) {
+            continue;
+        }
         if sb.check_access(&s, 'r').is_ok() && sb.check_extensions(&s, 'r').is_ok() {
             out.push(s);
         }
     }
     for d in dirs {
+        let s = d.to_string_lossy().into_owned();
+        {
+            let sb = sandbox.lock().map_err(|e| e.to_string())?;
+            if sb.is_deprecated(&s) {
+                continue;
+            }
+        }
         collect_files(&d, sandbox, out)?;
     }
     Ok(())
@@ -242,8 +251,37 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.txt"), "ALPHA = 1\nBETA = 2\n").unwrap();
         fs::write(root.join("b.txt"), "hello world\n").unwrap();
-        let sb = Sandbox::from_fs(&[format!("w:{}", root.display())], &[], &[".txt".into()]);
+        let sb = Sandbox::from_fs(
+            &[format!("w:{}", root.display())],
+            &[],
+            &[".txt".into()],
+            &[],
+            &[],
+        );
         (root, FsModule::new(Arc::new(Mutex::new(sb))))
+    }
+
+    fn setup_deprecated() -> (PathBuf, PathBuf, Arc<Mutex<Sandbox>>, FsModule) {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("search-dep-{nanos}"));
+        let target = root.join("target");
+        fs::create_dir_all(target.join("nested")).unwrap();
+        fs::write(target.join("hidden.txt"), "DEPRECATED_HIT\n").unwrap();
+        fs::write(target.join("nested").join("deep.txt"), "DEPRECATED_HIT\n").unwrap();
+        let banned = root.join("secret.log");
+        fs::write(&banned, "DEPRECATED_HIT\n").unwrap();
+        fs::write(root.join("ok.txt"), "VISIBLE_HIT\n").unwrap();
+        let sb = Arc::new(Mutex::new(Sandbox::from_fs(
+            &[format!("w:{}", root.display())],
+            &[],
+            &[],
+            &[target.display().to_string()],
+            &[banned.display().to_string()],
+        )));
+        (root, target, sb.clone(), FsModule::new(sb))
     }
 
     fn args(pairs: &[(&str, &str)]) -> Map<String, Value> {
@@ -307,6 +345,80 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.contains("cannot find_str"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_skips_deprecated_and_does_not_count_them() {
+        let (root, target, sb, m) = setup_deprecated();
+        let files = iter_files_for_search(&sb, &root.to_string_lossy()).unwrap();
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.contains("hidden") && !f.contains("deep") && !f.contains("secret")),
+            "{files:?}"
+        );
+        assert!(files.iter().any(|f| f.ends_with("ok.txt")), "{files:?}");
+
+        let found = m
+            .call(
+                "find_str",
+                &args(&[
+                    ("root", &root.to_string_lossy()),
+                    ("string", "DEPRECATED_HIT"),
+                ]),
+            )
+            .unwrap()
+            .output;
+        assert_eq!(found, "");
+
+        let visible = m
+            .call(
+                "find_str",
+                &args(&[("root", &root.to_string_lossy()), ("string", "VISIBLE_HIT")]),
+            )
+            .unwrap()
+            .output;
+        assert!(visible.contains("VISIBLE_HIT"), "{visible}");
+
+        let by_name = m
+            .call(
+                "find_file_by_str",
+                &args(&[("root", &root.to_string_lossy()), ("string", "hidden")]),
+            )
+            .unwrap()
+            .output;
+        assert_eq!(by_name, "");
+
+        let by_re = m
+            .call(
+                "find_files_by_regex",
+                &args(&[("root", &root.to_string_lossy()), ("regex", r"secret.*")]),
+            )
+            .unwrap()
+            .output;
+        assert_eq!(by_re, "");
+
+        let re_content = m
+            .call(
+                "find_str_by_regex",
+                &args(&[
+                    ("root", &root.to_string_lossy()),
+                    ("regex", "DEPRECATED_HIT"),
+                ]),
+            )
+            .unwrap()
+            .output;
+        assert_eq!(re_content, "");
+
+        let err = m
+            .call(
+                "find_str",
+                &args(&[("root", &target.to_string_lossy()), ("string", "x")]),
+            )
+            .unwrap_err();
+        assert!(err.contains("cannot find_str"), "{err}");
+        assert!(err.contains("deprecated"), "{err}");
         let _ = fs::remove_dir_all(&root);
     }
 }

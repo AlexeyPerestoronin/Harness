@@ -33,32 +33,48 @@ impl UserModule {
     /// JSON Schema descriptors for the user tools.
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
-            desc("ask_user", "Ask the user a question and get the answer.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"]})),
-            desc("request_read_access_for", "Request read access to a folder/file from the user.", json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]})),
-            desc("request_write_access_for", "Request write access to a folder/file from the user.", json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]})),
-            desc("request_command_shell_execution", "Request permission from the user to execute a shell command.", json!({"type":"object","properties":{"reason":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"}},"required":["reason","command","cwd"]})),
+            desc(
+                "ask_user",
+                "Ask the user a question and get the answer.",
+                json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"]}),
+            ),
+            desc(
+                "request_read_access_for",
+                "Request read access to a folder/file from the user.",
+                json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]}),
+            ),
+            desc(
+                "request_write_access_for",
+                "Request write access to a folder/file from the user.",
+                json!({"type":"object","properties":{"reason":{"type":"string"},"path":{"type":"string"}},"required":["reason","path"]}),
+            ),
+            desc(
+                "request_command_shell_execution",
+                "Request permission from the user to execute a shell command.",
+                json!({"type":"object","properties":{"reason":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"}},"required":["reason","command","cwd"]}),
+            ),
         ]
     }
 
     /// Dispatch a named user tool.
     pub fn call(&self, name: &str, args: &Map<String, Value>) -> Result<CallResult, String> {
         match name {
-            "ask_user" => Ok(CallResult::plain(self.ask_user(&arg_str(args, "question")?)?)),
-            "request_read_access_for" => Ok(CallResult::plain(self.request_read_access_for(
-                &arg_str(args, "reason")?,
-                &arg_str(args, "path")?,
-            )?)),
-            "request_write_access_for" => Ok(CallResult::plain(self.request_write_access_for(
-                &arg_str(args, "reason")?,
-                &arg_str(args, "path")?,
-            )?)),
-            "request_command_shell_execution" => Ok(CallResult::plain(
-                self.request_command_shell_execution(
+            "ask_user" => Ok(CallResult::plain(
+                self.ask_user(&arg_str(args, "question")?)?,
+            )),
+            "request_read_access_for" => Ok(CallResult::plain(
+                self.request_read_access_for(&arg_str(args, "reason")?, &arg_str(args, "path")?)?,
+            )),
+            "request_write_access_for" => Ok(CallResult::plain(
+                self.request_write_access_for(&arg_str(args, "reason")?, &arg_str(args, "path")?)?,
+            )),
+            "request_command_shell_execution" => {
+                Ok(CallResult::plain(self.request_command_shell_execution(
                     &arg_str(args, "reason")?,
                     &arg_str(args, "command")?,
                     &arg_str(args, "cwd")?,
-                )?,
-            )),
+                )?))
+            }
             _ => Err(format!("tool '{name}' not available")),
         }
     }
@@ -69,6 +85,9 @@ impl UserModule {
 
     fn request_read_access_for(&self, reason: &str, path: &str) -> Result<String, String> {
         (|| {
+            if let Some(denial) = deprecated_grant_denial(&self.sandbox, path, 'r')? {
+                return Ok(denial);
+            }
             match request_permission(&format!(
                 "Запрос read-доступа к '{path}'\nПричина: {reason}\nРазрешить? [y/n]"
             ))? {
@@ -76,7 +95,7 @@ impl UserModule {
                     self.sandbox
                         .lock()
                         .map_err(|e| e.to_string())?
-                        .grant_path_access(path, 'r');
+                        .grant_path_access(path, 'r')?;
                     Ok(format!("read-access granted to '{path}'"))
                 }
                 Some(denial) => Ok(format!("read-access denied to '{path}': {denial}")),
@@ -87,6 +106,9 @@ impl UserModule {
 
     fn request_write_access_for(&self, reason: &str, path: &str) -> Result<String, String> {
         (|| {
+            if let Some(denial) = deprecated_grant_denial(&self.sandbox, path, 'w')? {
+                return Ok(denial);
+            }
             match request_permission(&format!(
                 "Запрос write-доступа к '{path}'\nПричина: {reason}\nРазрешить? [y/n]"
             ))? {
@@ -94,7 +116,7 @@ impl UserModule {
                     self.sandbox
                         .lock()
                         .map_err(|e| e.to_string())?
-                        .grant_path_access(path, 'w');
+                        .grant_path_access(path, 'w')?;
                     Ok(format!("write-access granted to '{path}'"))
                 }
                 Some(denial) => Ok(format!("write-access denied to '{path}': {denial}")),
@@ -126,6 +148,27 @@ impl UserModule {
     }
 }
 
+/// Refusal before prompting the user when the path is excluded by `deprecated-*`.
+fn deprecated_grant_denial(
+    sandbox: &Arc<Mutex<Sandbox>>,
+    path: &str,
+    mode: char,
+) -> Result<Option<String>, String> {
+    let sb = sandbox.lock().map_err(|e| e.to_string())?;
+    Ok(deprecated_grant_denial_locked(&sb, path, mode))
+}
+
+fn deprecated_grant_denial_locked(sandbox: &Sandbox, path: &str, mode: char) -> Option<String> {
+    if sandbox.is_deprecated(path) {
+        let kind = if mode == 'w' { "write" } else { "read" };
+        Some(format!(
+            "{kind}-access denied to '{path}': path is deprecated"
+        ))
+    } else {
+        None
+    }
+}
+
 fn request_permission(prompt: &str) -> Result<Option<String>, String> {
     let answer = prompt_line(&format!("{prompt}\n"))?;
     if is_yes(&answer) {
@@ -136,16 +179,17 @@ fn request_permission(prompt: &str) -> Result<Option<String>, String> {
 }
 
 fn is_yes(answer: &str) -> bool {
-    matches!(answer.trim().to_lowercase().as_str(), "y" | "yes" | "д" | "да")
+    matches!(
+        answer.trim().to_lowercase().as_str(),
+        "y" | "yes" | "д" | "да"
+    )
 }
 
 fn prompt_line(prompt: &str) -> Result<String, String> {
     print!("{prompt}");
     let _ = io::stdout().flush();
     let mut buf = String::new();
-    io::stdin()
-        .read_line(&mut buf)
-        .map_err(|e| e.to_string())?;
+    io::stdin().read_line(&mut buf).map_err(|e| e.to_string())?;
     if buf.ends_with('\n') {
         buf.pop();
         if buf.ends_with('\r') {
@@ -166,10 +210,14 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{Map, Value};
 
     #[test]
     fn descriptors_registered() {
-        let names: Vec<_> = UserModule::descriptors().into_iter().map(|d| d.name).collect();
+        let names: Vec<_> = UserModule::descriptors()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         for n in [
             "ask_user",
             "request_read_access_for",
@@ -193,9 +241,55 @@ mod tests {
     #[test]
     fn grant_updates_sandbox() {
         let sb = Arc::new(Mutex::new(Sandbox::empty()));
-        sb.lock().unwrap().grant_path_access("notes.md", 'w');
+        sb.lock()
+            .unwrap()
+            .grant_path_access("notes.md", 'w')
+            .unwrap();
         let g = sb.lock().unwrap();
         assert!(g.r_files().iter().any(|p| p == "notes.md"));
         assert!(g.w_files().iter().any(|p| p == "notes.md"));
+    }
+
+    fn args(pairs: &[(&str, &str)]) -> Map<String, Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Value::String((*v).to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn request_access_deprecated_does_not_prompt() {
+        let sb = Sandbox::from_fs(&["w:.".into()], &[], &[], &["target".into()], &[]);
+        assert_eq!(
+            deprecated_grant_denial_locked(&sb, "target/x.txt", 'r').as_deref(),
+            Some("read-access denied to 'target/x.txt': path is deprecated")
+        );
+        assert_eq!(
+            deprecated_grant_denial_locked(&sb, "target", 'w').as_deref(),
+            Some("write-access denied to 'target': path is deprecated")
+        );
+        assert!(deprecated_grant_denial_locked(&sb, "src/main.rs", 'r').is_none());
+
+        let m = UserModule::new(Arc::new(Mutex::new(sb)), None);
+        let out = m
+            .call(
+                "request_read_access_for",
+                &args(&[("reason", "need it"), ("path", "target/x.txt")]),
+            )
+            .unwrap();
+        assert_eq!(
+            out.output,
+            "read-access denied to 'target/x.txt': path is deprecated"
+        );
+        let out = m
+            .call(
+                "request_write_access_for",
+                &args(&[("reason", "need it"), ("path", "target")]),
+            )
+            .unwrap();
+        assert_eq!(
+            out.output,
+            "write-access denied to 'target': path is deprecated"
+        );
     }
 }

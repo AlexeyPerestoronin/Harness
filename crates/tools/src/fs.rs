@@ -1,6 +1,7 @@
 //! Filesystem tool set (`tools.fs`): files/folders, search, and allow-list introspection.
 //!
-//! This module owns `available-dirs`, `available-file-extensions` and `available-files`.
+//! This module owns `available-dirs`, `available-file-extensions`, `available-files`,
+//! `deprecated-dirs` and `deprecated-files`.
 //! `write_file` creates parent directories; `create_file` does not and truncates
 //! an existing file.
 
@@ -39,6 +40,8 @@ impl FsModule {
                     &fs.available_dirs,
                     &fs.available_files,
                     &fs.available_file_extensions,
+                    &fs.deprecated_dirs,
+                    &fs.deprecated_files,
                 ))));
                 let sandbox = module.sandbox.clone();
                 (Some(module), sandbox)
@@ -88,20 +91,24 @@ impl FsModule {
                     kind: CallKind::Write,
                 })
             }
-            "create_file" => Ok(CallResult::plain(self.create_file(&arg_str(args, "path")?)?)),
-            "remove_file" => Ok(CallResult::plain(self.remove_file(&arg_str(args, "path")?)?)),
+            "create_file" => Ok(CallResult::plain(
+                self.create_file(&arg_str(args, "path")?)?,
+            )),
+            "remove_file" => Ok(CallResult::plain(
+                self.remove_file(&arg_str(args, "path")?)?,
+            )),
             "move_file" => Ok(CallResult::plain(
                 self.move_file(&arg_str(args, "src")?, &arg_str(args, "dst")?)?,
             )),
             "list_folder" => Ok(CallResult::plain(
                 self.list_folder(&arg_str(args, "path")?, &arg_str(args, "depth")?)?,
             )),
-            "create_folder" => {
-                Ok(CallResult::plain(self.create_folder(&arg_str(args, "path")?)?))
-            }
-            "remove_folder" => {
-                Ok(CallResult::plain(self.remove_folder(&arg_str(args, "path")?)?))
-            }
+            "create_folder" => Ok(CallResult::plain(
+                self.create_folder(&arg_str(args, "path")?)?,
+            )),
+            "remove_folder" => Ok(CallResult::plain(
+                self.remove_folder(&arg_str(args, "path")?)?,
+            )),
             "move_folder" => Ok(CallResult::plain(
                 self.move_folder(&arg_str(args, "src")?, &arg_str(args, "dst")?)?,
             )),
@@ -185,8 +192,9 @@ impl FsModule {
     fn list_folder(&self, path: &str, depth: &str) -> Result<String, String> {
         (|| {
             let depth: i32 = depth.parse().map_err(|e| format!("{e}"))?;
-            self.guard(path, 'r', false)?;
-            Ok(walk_folder(path, depth).join("\n"))
+            let sb = self.sandbox.lock().map_err(|e| e.to_string())?;
+            sb.check_access(path, 'r')?;
+            Ok(walk_folder(path, depth, &sb).join("\n"))
         })()
         .map_err(|e: String| format!("cannot list folder '{path}' → {e}"))
     }
@@ -243,7 +251,7 @@ impl FsModule {
     }
 }
 
-fn walk_folder(path: &str, depth: i32) -> Vec<String> {
+fn walk_folder(path: &str, depth: i32, sandbox: &Sandbox) -> Vec<String> {
     let mut result = Vec::new();
     if depth <= 0 {
         return result;
@@ -251,14 +259,15 @@ fn walk_folder(path: &str, depth: i32) -> Vec<String> {
     let Ok(entries) = fs::read_dir(path) else {
         return result;
     };
-    let mut names: Vec<_> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
+    let mut names: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
     names.sort();
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     for full in names {
+        let s = full.to_string_lossy();
+        if sandbox.is_deprecated(&s) {
+            continue;
+        }
         if full.is_dir() {
             dirs.push(full);
         } else {
@@ -267,7 +276,7 @@ fn walk_folder(path: &str, depth: i32) -> Vec<String> {
     }
     for folder in dirs {
         result.push(folder.to_string_lossy().into_owned());
-        result.extend(walk_folder(&folder.to_string_lossy(), depth - 1));
+        result.extend(walk_folder(&folder.to_string_lossy(), depth - 1, sandbox));
     }
     for file in files {
         result.push(file.to_string_lossy().into_owned());
@@ -296,8 +305,38 @@ mod tests {
             .as_nanos();
         let root = std::env::temp_dir().join(format!("fs-mod-{nanos}"));
         fs::create_dir_all(&root).unwrap();
-        let sb = Sandbox::from_fs(&[format!("w:{}", root.display())], &[], &[]);
+        let sb = Sandbox::from_fs(&[format!("w:{}", root.display())], &[], &[], &[], &[]);
         (root, FsModule::new(Arc::new(Mutex::new(sb))))
+    }
+
+    fn setup_deprecated() -> (PathBuf, PathBuf, PathBuf, FsModule) {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("fs-dep-{nanos}"));
+        let target = root.join("target");
+        fs::create_dir_all(target.join("nested")).unwrap();
+        fs::write(target.join("hidden.txt"), "DEPRECATED_HIT").unwrap();
+        fs::write(target.join("nested").join("deep.txt"), "DEPRECATED_HIT").unwrap();
+        let banned = root.join("secret.log");
+        fs::write(&banned, "DEPRECATED_HIT").unwrap();
+        fs::write(root.join("ok.txt"), "VISIBLE_HIT").unwrap();
+        fs::create_dir_all(root.join("target2")).unwrap();
+        fs::write(root.join("target2").join("ok2.txt"), "VISIBLE_HIT").unwrap();
+        let sb = Sandbox::from_fs(
+            &[format!("w:{}", root.display())],
+            &[],
+            &[],
+            &[target.display().to_string()],
+            &[banned.display().to_string()],
+        );
+        (
+            root,
+            target,
+            banned,
+            FsModule::new(Arc::new(Mutex::new(sb))),
+        )
     }
 
     fn args(pairs: &[(&str, &str)]) -> Map<String, Value> {
@@ -314,10 +353,7 @@ mod tests {
         let out = fsmod
             .call(
                 "write_file",
-                &args(&[
-                    ("path", &nested.to_string_lossy()),
-                    ("content", "hi"),
-                ]),
+                &args(&[("path", &nested.to_string_lossy()), ("content", "hi")]),
             )
             .unwrap();
         assert!(out.output.contains("success: wrote"));
@@ -325,14 +361,20 @@ mod tests {
 
         let missing = root.join("nope").join("c.txt");
         let err = fsmod
-            .call("create_file", &args(&[("path", &missing.to_string_lossy())]))
+            .call(
+                "create_file",
+                &args(&[("path", &missing.to_string_lossy())]),
+            )
             .unwrap_err();
         assert!(err.contains("cannot create file"), "{err}");
 
         let existing = root.join("e.txt");
         fs::write(&existing, "old").unwrap();
         fsmod
-            .call("create_file", &args(&[("path", &existing.to_string_lossy())]))
+            .call(
+                "create_file",
+                &args(&[("path", &existing.to_string_lossy())]),
+            )
             .unwrap();
         assert_eq!(fs::read_to_string(&existing).unwrap(), "");
         let _ = fs::remove_dir_all(&root);
@@ -366,7 +408,10 @@ mod tests {
 
     #[test]
     fn descriptors_cover_fs_tools() {
-        let names: Vec<_> = FsModule::descriptors().into_iter().map(|d| d.name).collect();
+        let names: Vec<_> = FsModule::descriptors()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         for n in [
             "read_file",
             "write_file",
@@ -454,12 +499,17 @@ mod tests {
     fn grant_write_visible_in_list_available() {
         let sb = Arc::new(Mutex::new(Sandbox::empty()));
         let m = FsModule::new(sb.clone());
-        sb.lock().unwrap().grant_path_access("notes.md", 'w');
+        sb.lock()
+            .unwrap()
+            .grant_path_access("notes.md", 'w')
+            .unwrap();
         let w = m.call("list_available_w_file", &Map::new()).unwrap();
         assert!(w.output.contains("notes.md"), "{}", w.output);
         let r = m.call("list_available_r_file", &Map::new()).unwrap();
         assert!(r.output.contains("notes.md"), "{}", r.output);
-        let ext = m.call("list_available_file_extension", &Map::new()).unwrap();
+        let ext = m
+            .call("list_available_file_extension", &Map::new())
+            .unwrap();
         assert_eq!(ext.output, "available: all");
     }
 
@@ -469,9 +519,13 @@ mod tests {
             &["w:src".into(), "r:docs".into()],
             &["r:README.md".into()],
             &[".md".into()],
+            &[],
+            &[],
         );
         let m = FsModule::new(Arc::new(Mutex::new(sb)));
-        let ext = m.call("list_available_file_extension", &Map::new()).unwrap();
+        let ext = m
+            .call("list_available_file_extension", &Map::new())
+            .unwrap();
         assert!(ext.output.contains(".md"), "{}", ext.output);
         let rdir = m.call("list_available_r_dir", &Map::new()).unwrap();
         assert!(rdir.output.contains("src"), "{}", rdir.output);
@@ -479,5 +533,71 @@ mod tests {
         let wdir = m.call("list_available_w_dir", &Map::new()).unwrap();
         assert!(wdir.output.contains("src"), "{}", wdir.output);
         assert!(!wdir.output.contains("docs"), "{}", wdir.output);
+    }
+
+    #[test]
+    fn list_folder_skips_deprecated_dir_and_file() {
+        let (root, target, banned, fsmod) = setup_deprecated();
+        let listing = fsmod
+            .call(
+                "list_folder",
+                &args(&[("path", &root.to_string_lossy()), ("depth", "3")]),
+            )
+            .unwrap()
+            .output;
+        let target_s = target.to_string_lossy().into_owned();
+        let sep = std::path::MAIN_SEPARATOR;
+        assert!(
+            listing
+                .lines()
+                .all(|l| l != target_s && !l.starts_with(&format!("{target_s}{sep}"))),
+            "{listing}"
+        );
+        assert!(!listing.contains("hidden.txt"), "{listing}");
+        assert!(!listing.contains("deep.txt"), "{listing}");
+        assert!(
+            !listing.contains(&banned.to_string_lossy().into_owned()),
+            "{listing}"
+        );
+        assert!(listing.contains("ok.txt"), "{listing}");
+        assert!(listing.contains("target2"), "{listing}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn move_file_dst_deprecated_leaves_src() {
+        let (root, target, _, fsmod) = setup_deprecated();
+        let src = root.join("ok.txt");
+        let dst = target.join("moved.txt");
+        let err = fsmod
+            .call(
+                "move_file",
+                &args(&[
+                    ("src", &src.to_string_lossy()),
+                    ("dst", &dst.to_string_lossy()),
+                ]),
+            )
+            .unwrap_err();
+        assert!(err.contains("deprecated"), "{err}");
+        assert!(src.exists());
+        assert!(!dst.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_file_deprecated_path() {
+        let (root, target, banned, fsmod) = setup_deprecated();
+        let err = fsmod
+            .call(
+                "read_file",
+                &args(&[("path", &target.join("hidden.txt").to_string_lossy())]),
+            )
+            .unwrap_err();
+        assert!(err.contains("deprecated"), "{err}");
+        let err = fsmod
+            .call("read_file", &args(&[("path", &banned.to_string_lossy())]))
+            .unwrap_err();
+        assert!(err.contains("deprecated"), "{err}");
+        let _ = fs::remove_dir_all(&root);
     }
 }
