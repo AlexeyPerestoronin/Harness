@@ -1,6 +1,6 @@
 //! Filesystem tool set (`tools.fs`): files/folders, search, and allow-list introspection.
 //!
-//! This module owns `available-dirs`, `available-file-extensions` and `extra-scope`.
+//! This module owns `available-dirs`, `available-file-extensions` and `available-files`.
 //! `write_file` creates parent directories; `create_file` does not and truncates
 //! an existing file.
 
@@ -37,7 +37,7 @@ impl FsModule {
             Some(fs) => {
                 let module = Self::new(Arc::new(Mutex::new(Sandbox::from_fs(
                     &fs.available_dirs,
-                    &fs.extra_scope,
+                    &fs.available_files,
                     &fs.available_file_extensions,
                 ))));
                 let sandbox = module.sandbox.clone();

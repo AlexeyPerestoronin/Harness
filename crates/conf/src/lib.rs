@@ -7,6 +7,7 @@
 pub mod str;
 
 mod error;
+mod fs_scope;
 mod load;
 mod template;
 mod vars;
@@ -92,6 +93,32 @@ mod tests {
         )
     }
 
+    fn fs_obj(dirs: &str, files: &str, dep_dirs: &str, dep_files: &str) -> String {
+        format!(
+            r#"{{ "{dirs_k}": {dirs}, "{ext}": [], "{files_k}": {files}, "{dd}": {dep_dirs}, "{df}": {dep_files} }}"#,
+            dirs_k = keys::AVAILABLE_DIRS,
+            ext = keys::AVAILABLE_FILE_EXTENSIONS,
+            files_k = keys::AVAILABLE_FILES,
+            dd = keys::DEPRECATED_DIRS,
+            df = keys::DEPRECATED_FILES,
+            dirs = dirs,
+            files = files,
+            dep_dirs = dep_dirs,
+            dep_files = dep_files,
+        )
+    }
+
+    fn load_fs_obj(label: &str, fs: &str) -> Result<Settings, ConfError> {
+        let dir = tmp_dir(label);
+        write(&dir.join("grok.json5"), &model_body("k"));
+        let tools = format!(r#"{{ "{fs_k}": {fs} }}"#, fs_k = keys::TOOL_FS);
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("grok.json5", &tools));
+        let result = load(&conf);
+        let _ = fs::remove_dir_all(&dir);
+        result
+    }
+
     #[test]
     fn keys_match_schema() {
         assert_eq!(keys::CWD, "cwd");
@@ -101,6 +128,10 @@ mod tests {
         assert_eq!(keys::TOOL_FS, "fs");
         assert_eq!(keys::TOOL_GIT, "git");
         assert_eq!(keys::EXECUTABLE, "executable");
+        assert_eq!(keys::AVAILABLE_FILES, "available-files");
+        assert_eq!(keys::EXTRA_SCOPE, "extra-scope");
+        assert_eq!(keys::DEPRECATED_DIRS, "deprecated-dirs");
+        assert_eq!(keys::DEPRECATED_FILES, "deprecated-files");
         assert_eq!(keys::MODE_SAFE, "safe");
         assert_eq!(keys::MODE_AUTO_ACCEPT, "auto-accept");
         assert_eq!(keys::DEFAULT_LOG_FOLDER, ".log");
@@ -112,14 +143,16 @@ mod tests {
         write(&dir.join("grok.json5"), &model_body("literal-key"));
         let tools = format!(
             r#"{{
-                "{fs}": {{ "{dirs}": ["w:src"], "{ext}": [], "{extra}": ["r:README.md"] }},
+                "{fs}": {{ "{dirs}": ["w:src"], "{ext}": [], "{files}": ["r:README.md"], "{ddirs}": ["target"], "{dfiles}": ["Cargo.lock"] }},
                 "{git}": {{ "{exe}": "C:/git/git.exe", "{lim}": 30 }},
                 "{user}": {{}}
             }}"#,
             fs = keys::TOOL_FS,
             dirs = keys::AVAILABLE_DIRS,
             ext = keys::AVAILABLE_FILE_EXTENSIONS,
-            extra = keys::EXTRA_SCOPE,
+            files = keys::AVAILABLE_FILES,
+            ddirs = keys::DEPRECATED_DIRS,
+            dfiles = keys::DEPRECATED_FILES,
             git = keys::TOOL_GIT,
             exe = keys::EXECUTABLE,
             lim = keys::EXECUTION_LIMIT,
@@ -137,6 +170,12 @@ mod tests {
         assert!(settings.tools.fs.is_some());
         assert!(settings.tools.git.is_some());
         assert!(settings.tools.terminal.is_none());
+        let fs = settings.tools.fs.as_ref().unwrap();
+        assert_eq!(fs.available_dirs, vec!["w:src".to_string()]);
+        assert!(fs.available_file_extensions.is_empty());
+        assert_eq!(fs.available_files, vec!["r:README.md".to_string()]);
+        assert_eq!(fs.deprecated_dirs, vec!["target".to_string()]);
+        assert_eq!(fs.deprecated_files, vec!["Cargo.lock".to_string()]);
         assert_eq!(
             settings.tools.git.as_ref().unwrap().executable,
             "C:/git/git.exe"
@@ -344,6 +383,11 @@ mod tests {
         assert!(text.contains(&format!("\"{}\"", keys::TOOL_GIT)));
         assert!(text.contains(&format!("\"{}\"", keys::TOOL_TERMINAL)));
         assert!(text.contains(&format!("\"{}\"", keys::TOOL_USER)));
+        assert!(text.contains(&format!("\"{}\"", keys::AVAILABLE_FILES)));
+        assert!(text.contains(&format!("\"{}\"", keys::DEPRECATED_DIRS)));
+        assert!(text.contains(&format!("\"{}\"", keys::DEPRECATED_FILES)));
+        assert!(!text.contains(&format!("\"{}\"", keys::EXTRA_SCOPE)));
+        json5::from_str::<serde_json::Value>(&text).expect("template must be valid json5");
         assert!(!text.contains("\"search\":"));
         assert!(!text.contains("\"meta\":"));
         assert!(text.contains("find_str"));
@@ -491,5 +535,172 @@ mod tests {
             "{err}"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_deprecated_lists_are_ok() {
+        let settings = load_fs_obj("fs-empty", &fs_obj("[]", "[]", "[]", "[]")).unwrap();
+        let fs = settings.tools.fs.unwrap();
+        assert!(fs.available_dirs.is_empty());
+        assert!(fs.available_files.is_empty());
+        assert!(fs.deprecated_dirs.is_empty());
+        assert!(fs.deprecated_files.is_empty());
+    }
+
+    #[test]
+    fn missing_deprecated_keys_is_error() {
+        let no_dirs = format!(
+            r#"{{ "{dirs}": [], "{ext}": [], "{files}": [], "{dfiles}": [] }}"#,
+            dirs = keys::AVAILABLE_DIRS,
+            ext = keys::AVAILABLE_FILE_EXTENSIONS,
+            files = keys::AVAILABLE_FILES,
+            dfiles = keys::DEPRECATED_FILES,
+        );
+        let err = load_fs_obj("fs-no-ddirs", &no_dirs).unwrap_err().to_string();
+        assert!(err.contains(keys::DEPRECATED_DIRS), "{err}");
+        assert!(err.contains("empty list"), "{err}");
+
+        let no_files = format!(
+            r#"{{ "{dirs}": [], "{ext}": [], "{files}": [], "{ddirs}": [] }}"#,
+            dirs = keys::AVAILABLE_DIRS,
+            ext = keys::AVAILABLE_FILE_EXTENSIONS,
+            files = keys::AVAILABLE_FILES,
+            ddirs = keys::DEPRECATED_DIRS,
+        );
+        let err = load_fs_obj("fs-no-dfiles", &no_files).unwrap_err().to_string();
+        assert!(err.contains(keys::DEPRECATED_FILES), "{err}");
+        assert!(err.contains("empty list"), "{err}");
+    }
+
+    #[test]
+    fn extra_scope_was_renamed() {
+        let fs = format!(
+            r#"{{ "{old}": ["r:README.md"], "{ddirs}": [], "{dfiles}": [] }}"#,
+            old = keys::EXTRA_SCOPE,
+            ddirs = keys::DEPRECATED_DIRS,
+            dfiles = keys::DEPRECATED_FILES,
+        );
+        let err = load_fs_obj("fs-renamed", &fs).unwrap_err().to_string();
+        assert!(err.contains("was renamed to"), "{err}");
+        assert!(err.contains(keys::EXTRA_SCOPE), "{err}");
+        assert!(err.contains(keys::AVAILABLE_FILES), "{err}");
+    }
+
+    #[test]
+    fn deprecated_entries_reject_prefix_and_empty() {
+        let err = load_fs_obj(
+            "fs-dep-prefix",
+            &fs_obj("[]", "[]", r#"["r:target"]"#, "[]"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains(keys::DEPRECATED_DIRS), "{err}");
+        assert!(err.contains("r:"), "{err}");
+
+        let err = load_fs_obj(
+            "fs-dep-w-prefix",
+            &fs_obj("[]", "[]", "[]", r#"["w:Cargo.lock"]"#),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains(keys::DEPRECATED_FILES), "{err}");
+        assert!(err.contains("w:"), "{err}");
+
+        let err = load_fs_obj("fs-dep-empty", &fs_obj("[]", "[]", r#"[""]"#, "[]"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(keys::DEPRECATED_DIRS), "{err}");
+        assert!(err.contains("empty"), "{err}");
+    }
+
+    #[test]
+    fn fs_conflicts_are_reported() {
+        let err = load_fs_obj(
+            "fs-dir-eq",
+            &fs_obj(r#"["w:src"]"#, "[]", r#"["src"]"#, "[]"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("conflicting settings"), "{err}");
+        assert!(err.contains(keys::AVAILABLE_DIRS), "{err}");
+        assert!(err.contains(keys::DEPRECATED_DIRS), "{err}");
+        assert!(err.contains("w:src"), "{err}");
+        assert!(err.contains("coincides with"), "{err}");
+
+        let err = load_fs_obj(
+            "fs-dir-nested",
+            &fs_obj(r#"["w:crates/conf"]"#, "[]", r#"["crates"]"#, "[]"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains(keys::AVAILABLE_DIRS), "{err}");
+        assert!(err.contains(keys::DEPRECATED_DIRS), "{err}");
+        assert!(err.contains("w:crates/conf"), "{err}");
+        assert!(err.contains("lies inside"), "{err}");
+
+        let err = load_fs_obj(
+            "fs-file-eq",
+            &fs_obj("[]", r#"["r:README.md"]"#, "[]", r#"["README.md"]"#),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains(keys::AVAILABLE_FILES), "{err}");
+        assert!(err.contains(keys::DEPRECATED_FILES), "{err}");
+        assert!(err.contains("r:README.md"), "{err}");
+
+        let err = load_fs_obj(
+            "fs-file-in-dir",
+            &fs_obj("[]", r#"["w:target/foo.txt"]"#, r#"["target"]"#, "[]"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains(keys::AVAILABLE_FILES), "{err}");
+        assert!(err.contains(keys::DEPRECATED_DIRS), "{err}");
+        assert!(err.contains("w:target/foo.txt"), "{err}");
+        assert!(err.contains("target"), "{err}");
+    }
+
+    #[test]
+    fn fs_lists_all_conflicts() {
+        let err = load_fs_obj(
+            "fs-multi",
+            &fs_obj(
+                r#"["w:src", "w:crates/conf"]"#,
+                r#"["r:README.md"]"#,
+                r#"["src", "crates"]"#,
+                r#"["README.md"]"#,
+            ),
+        )
+        .unwrap_err()
+        .to_string();
+        let n = err.lines().filter(|l| l.trim_start().starts_with('-')).count();
+        assert!(n >= 3, "{err}");
+        assert!(err.contains("w:src"), "{err}");
+        assert!(err.contains("w:crates/conf"), "{err}");
+        assert!(err.contains("r:README.md"), "{err}");
+    }
+
+    #[test]
+    fn fs_allowed_overlaps_and_separators() {
+        load_fs_obj("fs-root-target", &fs_obj(r#"["r:."]"#, "[]", r#"["target"]"#, "[]"))
+            .unwrap();
+        load_fs_obj(
+            "fs-dir-dep-file",
+            &fs_obj(r#"["r:crates"]"#, "[]", "[]", r#"["crates/a.txt"]"#),
+        )
+        .unwrap();
+        load_fs_obj(
+            "fs-conf-conf2",
+            &fs_obj(r#"["w:crates/conf"]"#, "[]", r#"["crates/conf2"]"#, "[]"),
+        )
+        .unwrap();
+        let err = load_fs_obj(
+            "fs-slash",
+            &fs_obj(r#"["w:crates/conf"]"#, "[]", r#"["crates\\conf"]"#, "[]"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("conflicting settings"), "{err}");
+        assert!(err.contains("w:crates/conf"), "{err}");
     }
 }

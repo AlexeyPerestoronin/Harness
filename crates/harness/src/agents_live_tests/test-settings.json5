@@ -26,8 +26,12 @@
             ],
             "available-file-extensions": [
             ],
-            "extra-scope": [
+            "available-files": [
                 "w:<test-file>"
+            ],
+            "deprecated-dirs": [
+            ],
+            "deprecated-files": [
             ]
         },
         "git": {

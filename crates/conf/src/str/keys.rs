@@ -79,7 +79,13 @@ pub const AVAILABLE_DIRS: &str = "available-dirs";
 /// Allowed file extensions; empty = any extension.
 pub const AVAILABLE_FILE_EXTENSIONS: &str = "available-file-extensions";
 /// Exact-file allow-list with `r:` / `w:` prefixes.
+pub const AVAILABLE_FILES: &str = "available-files";
+/// Former name of [`AVAILABLE_FILES`]. Presence in `tools.fs` is a load error.
 pub const EXTRA_SCOPE: &str = "extra-scope";
+/// Directory denylist without `r:` / `w:` prefixes.
+pub const DEPRECATED_DIRS: &str = "deprecated-dirs";
+/// File denylist without `r:` / `w:` prefixes.
+pub const DEPRECATED_FILES: &str = "deprecated-files";
 
 // ---------------------------------------------------------------------------
 // tools.git
@@ -132,5 +138,5 @@ pub const PLACEHOLDER_GIT_EXECUTABLE: &str = "path to git-executable file";
 pub const PLACEHOLDER_API_KEY: &str = "api-key or path to file with api-key";
 /// Stub for a directory in allow-lists / cwd-list.
 pub const PLACEHOLDER_DIR: &str = "<absolute or workspace-relative directory>";
-/// Stub for a file in extra-scope.
+/// Stub for a file in available-files.
 pub const PLACEHOLDER_FILE: &str = "<absolute or workspace-relative file>";

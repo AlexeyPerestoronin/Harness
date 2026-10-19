@@ -68,8 +68,14 @@ pub fn template_text() -> String {
             "{available_file_extensions}": [
             ],
             // Exact-file allow-list outside `{available_dirs}`. Prefixes `r:` / `w:`.
-            "{extra_scope}": [
+            "{available_files}": [
                 "r:{file_ph}"
+            ],
+            // Directories skipped by fs tools (build dirs, logs). No `r:` / `w:` prefixes. Empty list is allowed.
+            "{deprecated_dirs}": [
+            ],
+            // Files skipped by fs tools. No `r:` / `w:` prefixes. Empty list is allowed.
+            "{deprecated_files}": [
             ]
         }},
         // Git tools: is_file_under_git, get_file_diff, apply_diff_patch, discard_file_changes.
@@ -121,7 +127,9 @@ pub fn template_text() -> String {
         tool_fs = keys::TOOL_FS,
         available_dirs = keys::AVAILABLE_DIRS,
         available_file_extensions = keys::AVAILABLE_FILE_EXTENSIONS,
-        extra_scope = keys::EXTRA_SCOPE,
+        available_files = keys::AVAILABLE_FILES,
+        deprecated_dirs = keys::DEPRECATED_DIRS,
+        deprecated_files = keys::DEPRECATED_FILES,
         dir_ph = keys::PLACEHOLDER_DIR,
         file_ph = keys::PLACEHOLDER_FILE,
         tool_git = keys::TOOL_GIT,

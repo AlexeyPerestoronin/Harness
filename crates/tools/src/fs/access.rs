@@ -1,6 +1,6 @@
 //! Allow-lists for directories, exact files and extensions, owned by `fs`.
 //!
-//! Directories are matched by `abspath` prefix; extra-scope files by exact
+//! Directories are matched by `abspath` prefix; available-files by exact
 //! `abspath`. A `w:` grant always implies `r:`. Empty extension list means any
 //! extension is allowed. The lists are mutated at runtime by `request_*`.
 
@@ -20,7 +20,7 @@ impl Sandbox {
     /// Build from `tools.fs` entries. Unknown / unprefixed items are skipped.
     pub fn from_fs(
         available_dirs: &[String],
-        extra_scope: &[String],
+        available_files: &[String],
         extensions: &[String],
     ) -> Self {
         let mut sb = Self {
@@ -28,7 +28,7 @@ impl Sandbox {
             ..Self::default()
         };
         split_prefixed(available_dirs, &mut sb.r_dirs, &mut sb.w_dirs);
-        split_prefixed(extra_scope, &mut sb.r_files, &mut sb.w_files);
+        split_prefixed(available_files, &mut sb.r_files, &mut sb.w_files);
         sb
     }
 
@@ -47,12 +47,12 @@ impl Sandbox {
         &self.w_dirs
     }
 
-    /// Read-file extra-scope as stored (including `w` files).
+    /// Read-file available-files as stored (including `w` files).
     pub fn r_files(&self) -> &[String] {
         &self.r_files
     }
 
-    /// Write-file extra-scope as stored.
+    /// Write-file available-files as stored.
     pub fn w_files(&self) -> &[String] {
         &self.w_files
     }
@@ -103,7 +103,7 @@ impl Sandbox {
         }
     }
 
-    /// Grant runtime access. Existing directory → prefix list; otherwise extra-scope.
+    /// Grant runtime access. Existing directory → prefix list; otherwise available-files.
     /// `w` also adds the path to the matching `r` list.
     pub fn grant_path_access(&mut self, path: &str, mode: char) {
         let is_dir = Path::new(path).is_dir();

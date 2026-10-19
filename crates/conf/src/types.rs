@@ -103,7 +103,11 @@ pub struct FsSettings {
     /// Allowed extensions (including the leading dot). Empty = any.
     pub available_file_extensions: Vec<String>,
     /// Exact-file allow-list entries with `r:` / `w:` prefixes.
-    pub extra_scope: Vec<String>,
+    pub available_files: Vec<String>,
+    /// Directory denylist without `r:` / `w:` prefixes. Empty = none excluded.
+    pub deprecated_dirs: Vec<String>,
+    /// File denylist without `r:` / `w:` prefixes. Empty = none excluded.
+    pub deprecated_files: Vec<String>,
 }
 
 /// Settings for the `git` module.

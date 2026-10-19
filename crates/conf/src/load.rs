@@ -4,7 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-
 use crate::error::ConfError;
 use crate::str::keys;
 use crate::types::{
@@ -263,10 +262,30 @@ fn load_tools(obj: &serde_json::Map<String, Value>) -> Result<ToolsSettings, Con
 }
 
 fn load_fs(obj: &serde_json::Map<String, Value>) -> Result<FsSettings, ConfError> {
+    if obj.contains_key(keys::EXTRA_SCOPE) {
+        return Err(ConfError::new(format!(
+            "'{}' was renamed to '{}'",
+            keys::EXTRA_SCOPE,
+            keys::AVAILABLE_FILES
+        )));
+    }
+    let available_dirs = optional_string_list(obj, keys::AVAILABLE_DIRS)?;
+    let available_file_extensions = optional_string_list(obj, keys::AVAILABLE_FILE_EXTENSIONS)?;
+    let available_files = optional_string_list(obj, keys::AVAILABLE_FILES)?;
+    let deprecated_dirs = required_deprecated_list(obj, keys::DEPRECATED_DIRS)?;
+    let deprecated_files = required_deprecated_list(obj, keys::DEPRECATED_FILES)?;
+    crate::fs_scope::check_conflicts(
+        &available_dirs,
+        &available_files,
+        &deprecated_dirs,
+        &deprecated_files,
+    )?;
     Ok(FsSettings {
-        available_dirs: optional_string_list(obj, keys::AVAILABLE_DIRS)?,
-        available_file_extensions: optional_string_list(obj, keys::AVAILABLE_FILE_EXTENSIONS)?,
-        extra_scope: optional_string_list(obj, keys::EXTRA_SCOPE)?,
+        available_dirs,
+        available_file_extensions,
+        available_files,
+        deprecated_dirs,
+        deprecated_files,
     })
 }
 
@@ -385,4 +404,41 @@ fn as_u64(value: &Value) -> Option<u64> {
         .as_u64()
         .or_else(|| value.as_i64().and_then(|n| u64::try_from(n).ok()))
         .or_else(|| value.as_f64().and_then(|n| if n >= 0.0 { Some(n as u64) } else { None }))
+}
+
+fn required_string_list(
+    obj: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, ConfError> {
+    match obj.get(key) {
+        None => Err(ConfError::new(format!(
+            "please define '{key}' in '{}.{}' (it may be an empty list)",
+            keys::TOOLS,
+            keys::TOOL_FS
+        ))),
+        Some(Value::Array(items)) => items.iter().map(|v| expect_string(v, key)).collect(),
+        Some(_) => Err(ConfError::new(format!(
+            "'{key}' must be an array of strings"
+        ))),
+    }
+}
+
+fn required_deprecated_list(
+    obj: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, ConfError> {
+    let items = required_string_list(obj, key)?;
+    for item in &items {
+        if item.is_empty() {
+            return Err(ConfError::new(format!(
+                "'{key}' must not contain empty strings"
+            )));
+        }
+        if item.starts_with("r:") || item.starts_with("w:") {
+            return Err(ConfError::new(format!(
+                "'{key}' entries must not use 'r:' / 'w:' prefixes (those mark access mode and are meaningless for a denylist): '{item}'"
+            )));
+        }
+    }
+    Ok(items)
 }

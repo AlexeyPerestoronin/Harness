@@ -142,7 +142,7 @@ fn test_settings_template_loads() {
     assert!(!settings.agent.mode.is_safe());
     assert_eq!(settings.agent.token_limit, 32000);
     assert_eq!(settings.agent.iteration_limit, 10);
-    let extra = &settings.tools.fs.as_ref().expect("fs").extra_scope;
+    let extra = &settings.tools.fs.as_ref().expect("fs").available_files;
     assert!(
         extra.iter().any(|e| e.contains("test-file.txt")),
         "{extra:?}"
