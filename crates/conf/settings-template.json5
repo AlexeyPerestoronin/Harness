@@ -4,7 +4,7 @@
     "vars": {
         // Agent workspace (tools, logs, invoke). Absolute path, or relative to the process cwd.
         "workspace": "<workspace path>",
-        // Path to the agent json5 file (a file, not a folder; folder support is a later task).
+        // Path to an agent file or to a folder with agent files (you will be asked to choose).
         // Relative paths are resolved against the directory of this conf file.
         "agent-config": "grok-4.6.json5",
         // Confirmation mode: "safe" (ask when a limit is exceeded) or "auto-accept" (log and continue).
@@ -38,7 +38,7 @@
     },
     // Model file, confirmation mode and session limits.
     "agent-setting": {
-        // Path to the agent json5 file (a file, not a folder; folder support is a later task).
+        // Path to an agent file or to a folder with agent files (you will be asked to choose).
         // Relative to the directory of this conf file.
         "config": "${vars:agent-config}",
         // "safe" — confirm when a limit is exceeded; "auto-accept" — log and continue.

@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use crate::error::ConfError;
+
 /// Confirmation behaviour when a session limit is exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -38,6 +40,44 @@ pub enum AgentKind {
         /// API model id, e.g. `claude-sonnet-5-5`.
         api_model: String,
     },
+}
+
+impl AgentKind {
+    /// Map a vendor + display-name pair to a supported implementation.
+    pub(crate) fn from_vendor_name(vendor: &str, name: &str) -> Result<Self, ConfError> {
+        match (vendor, name) {
+            ("SpaceXAI", "Grok 4.6") => Ok(AgentKind::Xai {
+                api_model: "grok-4.6".into(),
+            }),
+            ("GoogleAI", "Gemini 3.8 Flash") => Ok(AgentKind::Google {
+                api_model: "gemini-3.8-flash".into(),
+            }),
+            ("GoogleAI", "Gemini 3.5 Flash Lite") => Ok(AgentKind::Google {
+                api_model: "gemini-3.5-flash-lite".into(),
+            }),
+            ("GoogleAI", "Gemini 3.1 Flash Lite") => Ok(AgentKind::Google {
+                api_model: "gemini-3.1-flash-lite".into(),
+            }),
+            ("Claude", "Claude Sonnet 5.5") => Ok(AgentKind::Claude {
+                api_model: "claude-sonnet-5-5".into(),
+            }),
+            _ => Err(ConfError::new(format!("unknown agent: {vendor} {name}"))),
+        }
+    }
+}
+
+/// An agent json5 file found while scanning a directory.
+///
+/// Produced without reading `api-key` or checking rate limits; full validation
+/// happens only after the caller picks one candidate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCandidate {
+    /// Absolute path to the agent file.
+    pub path: PathBuf,
+    /// Vendor string from the file (`SpaceXAI` / `GoogleAI` / `Claude`).
+    pub vendor: String,
+    /// Display name from the file (`Grok 4.6`, ...).
+    pub name: String,
 }
 
 /// Fully resolved harness configuration.
@@ -80,6 +120,8 @@ pub struct AgentSettings {
     pub tpm: Option<u32>,
     /// Requests per day (informational).
     pub rpd: Option<u32>,
+    /// Absolute path of the agent json5 file that was loaded.
+    pub config_path: PathBuf,
 }
 
 /// Optional settings for each tool module. `None` = module disabled.

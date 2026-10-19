@@ -86,10 +86,7 @@ fn parse_vars(
 
     let mut defs = HashMap::new();
     for (name, value) in obj {
-        let (line, col) = key_pos
-            .get(name)
-            .copied()
-            .unwrap_or((span.line, span.col));
+        let (line, col) = key_pos.get(name).copied().unwrap_or((span.line, span.col));
         if !is_valid_var_name(name) {
             return Err(loc_error(
                 source,
@@ -247,7 +244,9 @@ fn apply(
                     )
                 })?;
                 used.insert(name.to_string());
-                let ctx = state.context().expect("substitutions are not scanned in comments");
+                let ctx = state
+                    .context()
+                    .expect("substitutions are not scanned in comments");
                 out.push_str(&render(&def.value, ctx, source, cur.line, cur.col)?);
                 let skip = prefix.len() + name.len() + 1;
                 cur.advance_bytes(skip);
@@ -454,12 +453,7 @@ impl<'a> Cursor<'a> {
     }
 
     fn at(text: &'a str, i: usize, line: usize, col: usize) -> Self {
-        Self {
-            text,
-            i,
-            line,
-            col,
-        }
+        Self { text, i, line, col }
     }
 
     fn eof(&self) -> bool {
@@ -756,7 +750,10 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("only scalar values can be embedded into a string"), "{err}");
+        assert!(
+            err.contains("only scalar values can be embedded into a string"),
+            "{err}"
+        );
         assert_file_line_col(&err, "arr.json5");
     }
 
@@ -768,7 +765,10 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("only scalar values can be embedded into a string"), "{err}");
+        assert!(
+            err.contains("only scalar values can be embedded into a string"),
+            "{err}"
+        );
         assert_file_line_col(&err, "obj.json5");
     }
 

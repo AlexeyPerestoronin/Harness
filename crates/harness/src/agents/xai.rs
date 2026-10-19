@@ -3,9 +3,9 @@
 //! Conversation state is a local message list. The `x-grok-conv-id` header is
 //! sent on every request. Token accounting: `input + output - cached`.
 
+use std::sync::Arc;
 use std::time::Duration;
 use std::{path::Path, thread};
-use std::sync::Arc;
 
 use logger::Logger;
 use serde::{Deserialize, Serialize};
@@ -89,9 +89,7 @@ impl XaiAgent {
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send()
-                .map_err(|e| {
-                    format!("⚠️ {attempt}-attempt of xAI request failed: {e}")
-                });
+                .map_err(|e| format!("⚠️ {attempt}-attempt of xAI request failed: {e}"));
             if let Err(error) = &response {
                 last_err = error.clone();
                 self.logger.log_line(error.as_str());

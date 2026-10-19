@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tools::ToolRegistry;
 
-use conf::{AgentKind, AgentSettings};
 use super::{gemini_tools, invoke_tool, Agent, UsageStats};
+use conf::{AgentKind, AgentSettings};
 
 /// Gemini agent (vendor `GoogleAI`).
 pub struct GoogleAgent {
@@ -48,7 +48,11 @@ impl GoogleAgent {
             _ => return Err("expected Google agent settings".into()),
         };
         let rpm = agent.rpm.ok_or_else(|| {
-            format!("model '{}' requires '{}' in the model conf file", agent.name, conf::str::keys::RPM)
+            format!(
+                "model '{}' requires '{}' in the model conf file",
+                agent.name,
+                conf::str::keys::RPM
+            )
         })?;
         Ok(Self {
             tools,

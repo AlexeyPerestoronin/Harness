@@ -25,10 +25,22 @@ pub(crate) fn check_conflicts(
     deprecated_dirs: &[String],
     deprecated_files: &[String],
 ) -> Result<(), ConfError> {
-    let a_dirs: Vec<_> = available_dirs.iter().map(|e| resolve_available(e)).collect();
-    let a_files: Vec<_> = available_files.iter().map(|e| resolve_available(e)).collect();
-    let d_dirs: Vec<_> = deprecated_dirs.iter().map(|e| resolve_deprecated(e)).collect();
-    let d_files: Vec<_> = deprecated_files.iter().map(|e| resolve_deprecated(e)).collect();
+    let a_dirs: Vec<_> = available_dirs
+        .iter()
+        .map(|e| resolve_available(e))
+        .collect();
+    let a_files: Vec<_> = available_files
+        .iter()
+        .map(|e| resolve_available(e))
+        .collect();
+    let d_dirs: Vec<_> = deprecated_dirs
+        .iter()
+        .map(|e| resolve_deprecated(e))
+        .collect();
+    let d_files: Vec<_> = deprecated_files
+        .iter()
+        .map(|e| resolve_deprecated(e))
+        .collect();
 
     let mut lines = Vec::new();
     for a in &a_dirs {
@@ -75,11 +87,7 @@ pub(crate) fn check_conflicts(
         return Ok(());
     }
 
-    let mut msg = format!(
-        "{}.{}: conflicting settings\n",
-        keys::TOOLS,
-        keys::TOOL_FS
-    );
+    let mut msg = format!("{}.{}: conflicting settings\n", keys::TOOLS, keys::TOOL_FS);
     for line in &lines {
         msg.push_str("  - ");
         msg.push_str(line);

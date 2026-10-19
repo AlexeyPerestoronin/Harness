@@ -77,9 +77,7 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
         return Err("нужен --prompt, --dump или --conf-new".to_string());
     }
     if n > 1 {
-        return Err(
-            "--prompt, --dump и --conf-new взаимоисключающие".to_string(),
-        );
+        return Err("--prompt, --dump и --conf-new взаимоисключающие".to_string());
     }
     if conf_new.is_some() && conf.is_some() {
         return Err("--conf нельзя использовать вместе с --conf-new".to_string());
@@ -90,11 +88,7 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
     }
 
     let conf = conf.unwrap_or_else(default_conf_path);
-    Ok(CliAction::Start {
-        conf,
-        prompt,
-        dump,
-    })
+    Ok(CliAction::Start { conf, prompt, dump })
 }
 
 /// Default conf path: `<process-cwd>/harness.json5`.
@@ -160,15 +154,7 @@ mod tests {
         assert!(parse_args(&s(&["--prompt", "a", "--dump", "b"])).is_err());
         assert!(parse_args(&s(&["--prompt", "a", "--conf-new", "c"])).is_err());
         assert!(parse_args(&s(&["--dump", "b", "--conf-new", "c"])).is_err());
-        assert!(parse_args(&s(&[
-            "--prompt",
-            "a",
-            "--dump",
-            "b",
-            "--conf-new",
-            "c"
-        ]))
-        .is_err());
+        assert!(parse_args(&s(&["--prompt", "a", "--dump", "b", "--conf-new", "c"])).is_err());
     }
 
     #[test]
@@ -180,11 +166,7 @@ mod tests {
     #[test]
     fn prompt_uses_default_conf() {
         match parse_args(&s(&["--prompt", "hello"])).unwrap() {
-            CliAction::Start {
-                conf,
-                prompt,
-                dump,
-            } => {
+            CliAction::Start { conf, prompt, dump } => {
                 assert_eq!(conf, default_conf_path());
                 assert_eq!(prompt.as_deref(), Some("hello"));
                 assert!(dump.is_none());
@@ -196,11 +178,7 @@ mod tests {
     #[test]
     fn dump_and_custom_conf() {
         match parse_args(&s(&["--conf", "x.json5", "--dump", "d.json"])).unwrap() {
-            CliAction::Start {
-                conf,
-                prompt,
-                dump,
-            } => {
+            CliAction::Start { conf, prompt, dump } => {
                 assert_eq!(conf, PathBuf::from("x.json5"));
                 assert!(prompt.is_none());
                 assert_eq!(dump, Some(PathBuf::from("d.json")));

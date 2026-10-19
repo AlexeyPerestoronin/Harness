@@ -169,6 +169,9 @@ mod tests {
         let tools = claude_tools(&list);
         assert_eq!(tools[0]["input_schema"]["type"], "object");
         assert_eq!(tools[0]["input_schema"]["required"][0], "path");
-        assert_eq!(tools[0]["input_schema"]["properties"]["path"]["type"], "string");
+        assert_eq!(
+            tools[0]["input_schema"]["properties"]["path"]["type"],
+            "string"
+        );
     }
 }

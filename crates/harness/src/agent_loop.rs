@@ -23,14 +23,14 @@ pub struct AgentLoop {
     iteration: i64,
     iteration_limit: i64,
     agent: Box<dyn Agent>,
+    agent_config: PathBuf,
 }
 
 impl AgentLoop {
     /// Create logger, tool registry and the vendor agent.
     pub fn new(settings: &Settings, log_file: &Path, temp_dir: PathBuf) -> Result<Self, String> {
-        let logger: Arc<dyn Logger> = Arc::new(
-            DoubleLogger::new(log_file).map_err(|e| format!("cannot open log: {e}"))?,
-        );
+        let logger: Arc<dyn Logger> =
+            Arc::new(DoubleLogger::new(log_file).map_err(|e| format!("cannot open log: {e}"))?);
         let registry = Arc::new(ToolRegistry::build(
             &settings.tools,
             ToolsContext {
@@ -56,6 +56,7 @@ impl AgentLoop {
             iteration: 0,
             iteration_limit: settings.agent.iteration_limit,
             agent,
+            agent_config: settings.agent.config_path.clone(),
         })
     }
 
@@ -76,6 +77,8 @@ impl AgentLoop {
             self.agent.vendor(),
             self.agent.model()
         ));
+        self.logger
+            .log_line(&format!("- agent config: {}", self.agent_config.display()));
         self.logger
             .log_line(&format!("- iteration limit: {}", self.iteration_limit));
         self.logger
@@ -133,7 +136,8 @@ impl AgentLoop {
         }
         let secs = start_time.elapsed().as_secs();
         let formatted = format!("{}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60);
-        self.logger.log_line(&format!("# Execution time: {formatted}"));
+        self.logger
+            .log_line(&format!("# Execution time: {formatted}"));
         self.logger.log_line("");
         Ok(())
     }

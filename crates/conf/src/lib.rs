@@ -9,16 +9,17 @@ pub mod str;
 mod error;
 mod fs_scope;
 mod load;
+mod scan;
 mod template;
-mod vars;
 mod types;
+mod vars;
 
 pub use error::ConfError;
-pub use load::{load, load_model};
+pub use load::{load, load_model, load_with};
 pub use template::{template_text, write_new_conf};
 pub use types::{
-    AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings, TerminalSettings,
-    ToolsSettings, UserSettings,
+    AgentCandidate, AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings,
+    TerminalSettings, ToolsSettings, UserSettings,
 };
 
 #[cfg(test)]
@@ -399,7 +400,10 @@ mod tests {
         assert!(text.contains("//"));
         assert!(text.contains("Edit only this section"));
         assert!(text.contains("${vars:"));
-        assert!(text.find(&format!("\"{}\"", keys::VARS)).unwrap() < text.find(&format!("\"{}\"", keys::CWD)).unwrap());
+        assert!(
+            text.find(&format!("\"{}\"", keys::VARS)).unwrap()
+                < text.find(&format!("\"{}\"", keys::CWD)).unwrap()
+        );
         let err = write_new_conf(&path).unwrap_err().to_string();
         assert!(err.contains("already exists"), "{err}");
         let _ = fs::remove_dir_all(&dir);
@@ -609,16 +613,16 @@ mod tests {
             "vars": {{ "workspace": "C:/from-model" }},
             {body}
         }}"#,
-                body = model_body("literal-key").trim().trim_start_matches('{').trim_end_matches('}'),
+                body = model_body("literal-key")
+                    .trim()
+                    .trim_start_matches('{')
+                    .trim_end_matches('}'),
             ),
         );
         let conf = dir.join("harness.json5");
         write(
             &conf,
-            &harness_body("grok.json5", "{}").replace(
-                "\"C:/workspace\"",
-                "\"${vars:workspace}\"",
-            ),
+            &harness_body("grok.json5", "{}").replace("\"C:/workspace\"", "\"${vars:workspace}\""),
         );
         let err = load(&conf).unwrap_err().to_string();
         assert!(
@@ -631,10 +635,7 @@ mod tests {
     #[test]
     fn vars_do_not_leak_from_harness_to_model() {
         let dir = tmp_dir("vars-leak-m");
-        write(
-            &dir.join("grok.json5"),
-            &model_body("${vars:key}"),
-        );
+        write(&dir.join("grok.json5"), &model_body("${vars:key}"));
         let conf = dir.join("harness.json5");
         write(
             &conf,
@@ -679,7 +680,9 @@ mod tests {
             files = keys::AVAILABLE_FILES,
             dfiles = keys::DEPRECATED_FILES,
         );
-        let err = load_fs_obj("fs-no-ddirs", &no_dirs).unwrap_err().to_string();
+        let err = load_fs_obj("fs-no-ddirs", &no_dirs)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains(keys::DEPRECATED_DIRS), "{err}");
         assert!(err.contains("empty list"), "{err}");
 
@@ -690,7 +693,9 @@ mod tests {
             files = keys::AVAILABLE_FILES,
             ddirs = keys::DEPRECATED_DIRS,
         );
-        let err = load_fs_obj("fs-no-dfiles", &no_files).unwrap_err().to_string();
+        let err = load_fs_obj("fs-no-dfiles", &no_files)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains(keys::DEPRECATED_FILES), "{err}");
         assert!(err.contains("empty list"), "{err}");
     }
@@ -796,7 +801,10 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        let n = err.lines().filter(|l| l.trim_start().starts_with('-')).count();
+        let n = err
+            .lines()
+            .filter(|l| l.trim_start().starts_with('-'))
+            .count();
         assert!(n >= 3, "{err}");
         assert!(err.contains("w:src"), "{err}");
         assert!(err.contains("w:crates/conf"), "{err}");
@@ -805,8 +813,11 @@ mod tests {
 
     #[test]
     fn fs_allowed_overlaps_and_separators() {
-        load_fs_obj("fs-root-target", &fs_obj(r#"["r:."]"#, "[]", r#"["target"]"#, "[]"))
-            .unwrap();
+        load_fs_obj(
+            "fs-root-target",
+            &fs_obj(r#"["r:."]"#, "[]", r#"["target"]"#, "[]"),
+        )
+        .unwrap();
         load_fs_obj(
             "fs-dir-dep-file",
             &fs_obj(r#"["r:crates"]"#, "[]", "[]", r#"["crates/a.txt"]"#),
@@ -825,5 +836,211 @@ mod tests {
         .to_string();
         assert!(err.contains("conflicting settings"), "{err}");
         assert!(err.contains("w:crates/conf"), "{err}");
+    }
+
+    fn agent_json(vendor: &str, name: &str, api_key: &str) -> String {
+        format!(
+            r#"{{ "{v}": "{vendor}", "{n}": "{name}", "{k}": "{api_key}" }}"#,
+            v = keys::VENDOR,
+            n = keys::NAME,
+            k = keys::API_KEY,
+        )
+    }
+
+    fn names(cands: &[AgentCandidate]) -> Vec<String> {
+        cands
+            .iter()
+            .map(|c| c.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn scan_dir_finds_sorted_candidates_and_skips_junk() {
+        let dir = tmp_dir("scan-three");
+        let agents = dir.join("agents");
+        fs::create_dir(&agents).unwrap();
+        write(
+            &agents.join("grok-4.6.json5"),
+            &agent_json("SpaceXAI", "Grok 4.6", "k"),
+        );
+        write(
+            &agents.join("claude-sonnet-5-5.json5"),
+            &agent_json("Claude", "Claude Sonnet 5.5", "k"),
+        );
+        write(
+            &agents.join("gemini-3.8-flash.json5"),
+            &agent_json("GoogleAI", "Gemini 3.8 Flash", "k"),
+        );
+        write(&agents.join("notes.json5"), r#"{ "hello": 1 }"#);
+        write(&agents.join("readme.txt"), "ignore me");
+        let (cands, skipped) = crate::scan::scan_agent_dir(&agents).unwrap();
+        assert_eq!(
+            names(&cands),
+            vec![
+                "claude-sonnet-5-5.json5",
+                "gemini-3.8-flash.json5",
+                "grok-4.6.json5",
+            ]
+        );
+        assert_eq!(cands[0].vendor, "Claude");
+        assert_eq!(cands[1].vendor, "GoogleAI");
+        assert_eq!(cands[2].vendor, "SpaceXAI");
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].file, "notes.json5");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_recognizes_vendor_name_from_vars() {
+        let dir = tmp_dir("scan-vars");
+        write(
+            &dir.join("v.json5"),
+            r#"{
+            "vars": { "v": "SpaceXAI", "n": "Grok 4.6" },
+            "vendor": "${vars:v}",
+            "name": "${vars:n}",
+            "api-key": "k"
+        }"#,
+        );
+        let (cands, skipped) = crate::scan::scan_agent_dir(&dir).unwrap();
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].vendor, "SpaceXAI");
+        assert_eq!(cands[0].name, "Grok 4.6");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_ignores_missing_api_key_and_rpm() {
+        let dir = tmp_dir("scan-nokey");
+        write(
+            &dir.join("no-key.json5"),
+            r#"{ "vendor": "SpaceXAI", "name": "Grok 4.6" }"#,
+        );
+        write(
+            &dir.join("google.json5"),
+            r#"{ "vendor": "GoogleAI", "name": "Gemini 3.8 Flash" }"#,
+        );
+        let (cands, skipped) = crate::scan::scan_agent_dir(&dir).unwrap();
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(cands.len(), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_empty_dir_and_no_recursion() {
+        let dir = tmp_dir("scan-empty");
+        let nested = dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        write(&nested.join("grok.json5"), &model_body("k"));
+        write(&dir.join("notes.txt"), "no");
+        let (cands, skipped) = crate::scan::scan_agent_dir(&dir).unwrap();
+        assert!(cands.is_empty());
+        assert!(skipped.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_with_dir_picks_chosen_file() {
+        let dir = tmp_dir("load-dir");
+        let agents = dir.join("agents");
+        fs::create_dir(&agents).unwrap();
+        write(
+            &agents.join("claude-sonnet-5-5.json5"),
+            &agent_json("Claude", "Claude Sonnet 5.5", "ck"),
+        );
+        write(
+            &agents.join("grok-4.6.json5"),
+            &agent_json("SpaceXAI", "Grok 4.6", "gk"),
+        );
+        write(&agents.join("junk.json5"), "{ not valid");
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("agents", "{}"));
+        let settings = load_with(&conf, |c| {
+            assert_eq!(c.len(), 2);
+            assert_eq!(c[0].vendor, "Claude");
+            assert_eq!(c[1].vendor, "SpaceXAI");
+            Ok(1)
+        })
+        .unwrap();
+        assert_eq!(settings.agent.vendor, "SpaceXAI");
+        assert_eq!(settings.agent.name, "Grok 4.6");
+        assert_eq!(settings.agent.api_key, "gk");
+        assert_eq!(settings.agent.token_limit, 128000);
+        assert_eq!(
+            settings.agent.config_path.file_name().unwrap(),
+            "grok-4.6.json5"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_with_dir_unselected_missing_key_is_ok() {
+        let dir = tmp_dir("load-dir-key");
+        let agents = dir.join("agents");
+        fs::create_dir(&agents).unwrap();
+        write(
+            &agents.join("a-broken.json5"),
+            r#"{ "vendor": "Claude", "name": "Claude Sonnet 5.5" }"#,
+        );
+        write(
+            &agents.join("b-ok.json5"),
+            &agent_json("SpaceXAI", "Grok 4.6", "ok"),
+        );
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("agents", "{}"));
+        let settings = load_with(&conf, |c| {
+            assert_eq!(c.len(), 2);
+            Ok(1)
+        })
+        .unwrap();
+        assert_eq!(settings.agent.api_key, "ok");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_with_empty_dir_is_error() {
+        let dir = tmp_dir("load-empty");
+        let agents = dir.join("agents");
+        fs::create_dir(&agents).unwrap();
+        write(&agents.join("notes.json5"), "{");
+        let nested = agents.join("nested");
+        fs::create_dir(&nested).unwrap();
+        write(&nested.join("grok.json5"), &model_body("k"));
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("agents", "{}"));
+        let err = load_with(&conf, |_| panic!("chooser must not run"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no agent config files found in"), "{err}");
+        assert!(err.contains("skipped 'notes.json5'"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_config_without_extension_hints_dir() {
+        let dir = tmp_dir("missing-dir");
+        write(&dir.join("grok.json5"), &model_body("k"));
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("no-such-agents", "{}"));
+        let err = load(&conf).unwrap_err().to_string();
+        assert!(err.contains("cannot read model file"), "{err}");
+        assert!(err.contains("expected a file or a directory"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_file_does_not_call_chooser() {
+        let dir = tmp_dir("load-file");
+        write(&dir.join("grok.json5"), &model_body("k"));
+        let conf = dir.join("harness.json5");
+        write(&conf, &harness_body("grok.json5", "{}"));
+        let settings = load_with(&conf, |_| panic!("chooser must not run")).unwrap();
+        assert_eq!(settings.agent.vendor, "SpaceXAI");
+        assert_eq!(
+            settings.agent.config_path.file_name().unwrap(),
+            "grok.json5"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

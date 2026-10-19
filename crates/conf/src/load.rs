@@ -3,16 +3,33 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
 use crate::error::ConfError;
+use crate::scan::{scan_agent_dir, SkippedFile};
 use crate::str::keys;
 use crate::types::{
-    AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings, TerminalSettings,
-    ToolsSettings, UserSettings,
+    AgentCandidate, AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings,
+    TerminalSettings, ToolsSettings, UserSettings,
 };
+use serde_json::Value;
 
 /// Load and validate a harness configuration file.
+///
+/// If `agent-setting.config` is a directory this fails with
+/// `agent was not selected`. Use [`load_with`] to choose a candidate.
 pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
+    load_with(conf_path, |_| Err("agent was not selected".into()))
+}
+
+/// Load and validate a harness configuration file.
+///
+/// When `agent-setting.config` is a **file**, `chooser` is not called.
+/// When it is a **directory**, `chooser` receives the sorted candidate list
+/// and must return a 0-based index. Session limits (`mode`, `token-limit`,
+/// `iteration-limit`, `USD-limit`) always come from `harness.json5`.
+pub fn load_with<F>(conf_path: &Path, mut chooser: F) -> Result<Settings, ConfError>
+where
+    F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
+{
     let conf_path = if conf_path.is_absolute() {
         conf_path.to_path_buf()
     } else {
@@ -55,7 +72,7 @@ pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
         .get(keys::AGENT_SETTING)
         .ok_or_else(|| ConfError::new(format!("missing '{}'", keys::AGENT_SETTING)))?;
     let agent_obj = expect_object(agent_raw, keys::AGENT_SETTING)?;
-    let agent = load_agent(agent_obj, &conf_dir)?;
+    let agent = load_agent(agent_obj, &conf_dir, &mut chooser)?;
 
     let tools = match obj.get(keys::TOOLS) {
         Some(v) => load_tools(expect_object(v, keys::TOOLS)?)?,
@@ -83,12 +100,10 @@ pub fn load_model(model_path: &Path, mode: Mode) -> Result<AgentSettings, ConfEr
         std::env::current_dir()?.join(model_path)
     };
     let model_obj = read_model_object(&model_path)?;
-    settings_from_model(&model_obj, mode, None)
+    settings_from_model(&model_obj, mode, None, model_path)
 }
 
-fn read_model_object(
-    model_path: &Path,
-) -> Result<serde_json::Map<String, Value>, ConfError> {
+fn read_model_object(model_path: &Path) -> Result<serde_json::Map<String, Value>, ConfError> {
     let model_text = fs::read_to_string(model_path).map_err(|e| {
         ConfError::new(format!(
             "cannot read model file '{}': {e}",
@@ -100,7 +115,14 @@ fn read_model_object(
     expect_object(&model_root, &model_path.display().to_string()).cloned()
 }
 
-fn load_agent(agent_obj: &serde_json::Map<String, Value>, conf_dir: &Path) -> Result<AgentSettings, ConfError> {
+fn load_agent<F>(
+    agent_obj: &serde_json::Map<String, Value>,
+    conf_dir: &Path,
+    chooser: &mut F,
+) -> Result<AgentSettings, ConfError>
+where
+    F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
+{
     let config_rel = required_string(agent_obj, keys::CONFIG)?;
     let mode_raw = required_string(agent_obj, keys::MODE)?;
     let mode = match mode_raw.as_str() {
@@ -128,23 +150,66 @@ fn load_agent(agent_obj: &serde_json::Map<String, Value>, conf_dir: &Path) -> Re
             conf_dir.join(p)
         }
     };
-    let model_obj = read_model_object(&model_path)?;
+    let model_path = if model_path.is_dir() {
+        choose_from_dir(&model_path, chooser)?
+    } else {
+        model_path
+    };
+    let model_obj = match read_model_object(&model_path) {
+        Ok(obj) => obj,
+        Err(e) => {
+            if !model_path.exists() && model_path.extension().is_none() {
+                return Err(ConfError::new(format!(
+                    "{e} (expected a file or a directory)"
+                )));
+            }
+            return Err(e);
+        }
+    };
     settings_from_model(
         &model_obj,
         mode,
         Some((token_limit, iteration_limit, usd_limit)),
+        model_path,
     )
+}
+
+fn choose_from_dir<F>(dir: &Path, chooser: &mut F) -> Result<PathBuf, ConfError>
+where
+    F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
+{
+    let (candidates, skipped) = scan_agent_dir(dir)?;
+    report_skipped(&skipped);
+    if candidates.is_empty() {
+        let mut msg = format!("no agent config files found in '{}'", dir.display());
+        for s in &skipped {
+            msg.push_str(&format!("\nskipped '{}': {}", s.file, s.reason));
+        }
+        return Err(ConfError::new(msg));
+    }
+    let index = chooser(&candidates).map_err(ConfError::new)?;
+    let chosen = candidates
+        .get(index)
+        .ok_or_else(|| ConfError::new("agent was not selected".to_string()))?;
+    Ok(chosen.path.clone())
+}
+
+fn report_skipped(skipped: &[SkippedFile]) {
+    for s in skipped {
+        eprintln!("skipped '{}': {}", s.file, s.reason);
+    }
 }
 
 fn settings_from_model(
     model_obj: &serde_json::Map<String, Value>,
     mode: Mode,
     limits: Option<(i64, i64, f64)>,
+    config_path: PathBuf,
 ) -> Result<AgentSettings, ConfError> {
     let vendor = required_string(model_obj, keys::VENDOR)?;
     let name = required_string(model_obj, keys::NAME)?;
     let api_key = resolve_api_key(model_obj)?;
-    let kind = agent_kind(&vendor, &name)?;
+    let kind = AgentKind::from_vendor_name(&vendor, &name)?;
 
     let rpm = optional_u32(model_obj, keys::RPM)?;
     let tpm = optional_u32(model_obj, keys::TPM)?;
@@ -178,30 +243,8 @@ fn settings_from_model(
         rpm,
         tpm,
         rpd,
+        config_path,
     })
-}
-
-fn agent_kind(vendor: &str, name: &str) -> Result<AgentKind, ConfError> {
-    match (vendor, name) {
-        ("SpaceXAI", "Grok 4.6") => Ok(AgentKind::Xai {
-            api_model: "grok-4.6".into(),
-        }),
-        ("GoogleAI", "Gemini 3.8 Flash") => Ok(AgentKind::Google {
-            api_model: "gemini-3.8-flash".into(),
-        }),
-        ("GoogleAI", "Gemini 3.5 Flash Lite") => Ok(AgentKind::Google {
-            api_model: "gemini-3.5-flash-lite".into(),
-        }),
-        ("GoogleAI", "Gemini 3.1 Flash Lite") => Ok(AgentKind::Google {
-            api_model: "gemini-3.1-flash-lite".into(),
-        }),
-        ("Claude", "Claude Sonnet 5.5") => Ok(AgentKind::Claude {
-            api_model: "claude-sonnet-5-5".into(),
-        }),
-        _ => Err(ConfError::new(format!(
-            "unknown agent: {vendor} {name}"
-        ))),
-    }
 }
 
 fn resolve_api_key(model_obj: &serde_json::Map<String, Value>) -> Result<String, ConfError> {
@@ -253,9 +296,7 @@ fn load_tools(obj: &serde_json::Map<String, Value>) -> Result<ToolsSettings, Con
         } else if name == keys::TOOL_USER {
             settings.user = Some(UserSettings {});
         } else {
-            return Err(ConfError::new(format!(
-                "unknown tool module '{name}'"
-            )));
+            return Err(ConfError::new(format!("unknown tool module '{name}'")));
         }
     }
     Ok(settings)
@@ -318,7 +359,9 @@ fn expect_object<'a>(
     value: &'a Value,
     what: &str,
 ) -> Result<&'a serde_json::Map<String, Value>, ConfError> {
-    value.as_object().ok_or_else(|| ConfError::new(format!("'{what}' must be an object")))
+    value
+        .as_object()
+        .ok_or_else(|| ConfError::new(format!("'{what}' must be an object")))
 }
 
 fn expect_string(value: &Value, key: &str) -> Result<String, ConfError> {
@@ -377,11 +420,10 @@ fn optional_string_list(
 ) -> Result<Vec<String>, ConfError> {
     match obj.get(key) {
         None => Ok(Vec::new()),
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|v| expect_string(v, key))
-            .collect(),
-        Some(_) => Err(ConfError::new(format!("'{key}' must be an array of strings"))),
+        Some(Value::Array(items)) => items.iter().map(|v| expect_string(v, key)).collect(),
+        Some(_) => Err(ConfError::new(format!(
+            "'{key}' must be an array of strings"
+        ))),
     }
 }
 
@@ -403,7 +445,11 @@ fn as_u64(value: &Value) -> Option<u64> {
     value
         .as_u64()
         .or_else(|| value.as_i64().and_then(|n| u64::try_from(n).ok()))
-        .or_else(|| value.as_f64().and_then(|n| if n >= 0.0 { Some(n as u64) } else { None }))
+        .or_else(|| {
+            value
+                .as_f64()
+                .and_then(|n| if n >= 0.0 { Some(n as u64) } else { None })
+        })
 }
 
 fn required_string_list(

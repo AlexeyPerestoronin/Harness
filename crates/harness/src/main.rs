@@ -4,10 +4,11 @@
 //! inside `conf`; this binary receives typed settings.
 
 mod agent_loop;
+mod agent_select;
 mod agents;
-mod cli;
 #[cfg(test)]
 mod agents_live_tests;
+mod cli;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -47,7 +48,7 @@ fn start_session(
     prompt: Option<String>,
     dump: Option<PathBuf>,
 ) -> Result<(), String> {
-    let settings = conf::load(&conf_path).map_err(|e| e.to_string())?;
+    let settings = conf::load_with(&conf_path, agent_select::choose).map_err(|e| e.to_string())?;
     let log_dir = agent_loop::session_dir(&settings)?;
     let log_file = log_dir.join("log.md");
     let dump_file = log_dir.join("dump.json");

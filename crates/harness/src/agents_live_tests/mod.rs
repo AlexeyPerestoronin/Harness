@@ -26,10 +26,10 @@ fn workspace_root() -> PathBuf {
 fn strip_verbatim(path: PathBuf) -> PathBuf {
     #[cfg(windows)]
     {
-    let s = path.to_string_lossy();
-    if let Some(rest) = s.strip_prefix(r"\\?\") {
-        return PathBuf::from(rest);
-    }
+        let s = path.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
     }
     path
 }
@@ -99,9 +99,8 @@ fn run_live(model_file: &str) {
     };
 
     let conf_path = write_test_conf(model_file);
-    let mut settings = load(&conf_path).unwrap_or_else(|e| {
-        panic!("cannot load live test conf '{}': {e}", conf_path.display())
-    });
+    let mut settings = load(&conf_path)
+        .unwrap_or_else(|e| panic!("cannot load live test conf '{}': {e}", conf_path.display()));
     settings.agent.api_key = read_api_key(&settings.agent.vendor);
 
     let log_dir = agent_loop::session_dir(&settings).expect("session dir");

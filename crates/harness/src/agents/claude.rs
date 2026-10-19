@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tools::ToolRegistry;
 
-use conf::{AgentKind, AgentSettings};
 use super::{claude_tools, invoke_tool, Agent, UsageStats};
+use conf::{AgentKind, AgentSettings};
 
 const CLAUDE_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -156,7 +156,8 @@ impl Agent for ClaudeAgent {
                 self.logger.log_line("```");
                 self.logger.log_line(prompt);
                 self.logger.log_line("```");
-                self.messages.push(json!({"role": "user", "content": prompt}));
+                self.messages
+                    .push(json!({"role": "user", "content": prompt}));
             }
         }
         let parsed = self.execute_request()?;

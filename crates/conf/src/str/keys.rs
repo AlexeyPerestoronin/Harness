@@ -25,7 +25,7 @@ pub const VARS: &str = "vars";
 // agent-setting
 // ---------------------------------------------------------------------------
 
-/// Path to the model json5, relative to the directory of `--conf`.
+/// Path to an agent json5 file or a folder of such files, relative to `--conf`.
 pub const CONFIG: &str = "config";
 /// Confirmation mode: `safe` or `auto-accept`.
 pub const MODE: &str = "mode";
