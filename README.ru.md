@@ -1,6 +1,6 @@
 # Native Agent Harness
 
-[English](README.en.md)
+[English](README.md)
 
 ## Что это
 
