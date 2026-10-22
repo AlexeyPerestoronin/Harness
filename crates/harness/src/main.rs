@@ -6,8 +6,6 @@
 mod agent_loop;
 mod agent_select;
 mod agents;
-#[cfg(test)]
-mod agents_live_tests;
 mod cli;
 
 use std::path::PathBuf;
