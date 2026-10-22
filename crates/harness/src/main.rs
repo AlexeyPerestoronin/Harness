@@ -11,7 +11,7 @@ mod cli;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cli::{parse_args, CliAction, HELP};
+use cli::{parse_args, version_line, CliAction, HELP};
 
 fn main() -> ExitCode {
     match run() {
@@ -28,6 +28,10 @@ fn run() -> Result<(), String> {
     match parse_args(&args)? {
         CliAction::Help => print_help(HELP),
         CliAction::HelpTools => print_help(tools::HELP_USER),
+        CliAction::Version => {
+            println!("{}", version_line());
+            Ok(())
+        }
         CliAction::ConfNew { path } => {
             conf::write_new_conf(&path).map_err(|e| e.to_string())?;
             Ok(())

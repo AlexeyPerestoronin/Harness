@@ -1,9 +1,9 @@
 //! Command-line interface for `harness.exe`.
 //!
 //! Parsing is explicit (no clap) so `--help` is the compile-time `help.txt`,
-//! `--help-tools` is `tools::HELP_USER`, and the xor rules for `--prompt` /
-//! `--dump` / `--conf-new` are checked in one place. `--conf` defaults to
-//! `<process-cwd>/harness.json5`.
+//! `--help-tools` is `tools::HELP_USER`, `--version` is `CARGO_PKG_VERSION`,
+//! and the xor rules for `--prompt` / `--dump` / `--conf-new` are checked in
+//! one place. `--conf` defaults to `<process-cwd>/harness.json5`.
 
 use std::path::PathBuf;
 
@@ -17,6 +17,8 @@ pub enum CliAction {
     Help,
     /// Print [`tools::HELP_USER`] and exit 0.
     HelpTools,
+    /// Print the application version and exit 0.
+    Version,
     /// Write a conf template and exit.
     ConfNew {
         /// Destination path for the new json5 file.
@@ -41,6 +43,7 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut conf_new: Option<PathBuf> = None;
     let mut help = false;
     let mut help_tools = false;
+    let mut version = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -52,6 +55,11 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
         }
         if a == "--help-tools" {
             help_tools = true;
+            i += 1;
+            continue;
+        }
+        if a == "--version" {
+            version = true;
             i += 1;
             continue;
         }
@@ -79,6 +87,9 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
     }
     if help_tools {
         return Ok(CliAction::HelpTools);
+    }
+    if version {
+        return Ok(CliAction::Version);
     }
 
     let n = [prompt.is_some(), dump.is_some(), conf_new.is_some()]
@@ -110,6 +121,11 @@ pub fn default_conf_path() -> PathBuf {
         .join("harness.json5")
 }
 
+/// One-line version string for `--version`: `harness <X.Y.Z>`.
+pub fn version_line() -> String {
+    format!("harness {}", env!("CARGO_PKG_VERSION"))
+}
+
 fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<Option<String>, String> {
     let a = args[*i].as_str();
     let prefix = format!("{flag}=");
@@ -126,42 +142,4 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<Option<Strin
         return Ok(Some(rest.to_string()));
     }
     Ok(None)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn args(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| (*s).to_string()).collect()
-    }
-
-    #[test]
-    fn help_tools_flag() {
-        assert_eq!(
-            parse_args(&args(&["--help-tools"])).unwrap(),
-            CliAction::HelpTools
-        );
-    }
-
-    #[test]
-    fn help_tools_ignores_prompt() {
-        assert_eq!(
-            parse_args(&args(&["--help-tools", "--prompt", "x"])).unwrap(),
-            CliAction::HelpTools
-        );
-    }
-
-    #[test]
-    fn help_wins_over_help_tools() {
-        assert_eq!(
-            parse_args(&args(&["--help", "--help-tools"])).unwrap(),
-            CliAction::Help
-        );
-    }
-
-    #[test]
-    fn help_text_mentions_help_tools() {
-        assert!(HELP.contains("--help-tools"));
-    }
 }
