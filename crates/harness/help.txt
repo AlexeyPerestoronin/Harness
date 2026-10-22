@@ -2,6 +2,7 @@ harness.exe — native agent loop.
 
 USAGE:
     harness.exe --help
+    harness.exe --help-tools
     harness.exe [--conf <path>] --prompt "<user prompt>"
     harness.exe [--conf <path>] --dump "<path to dump file>"
     harness.exe --conf-new "<path to new conf file>"
@@ -9,6 +10,9 @@ USAGE:
 FLAGS:
     --help
         Print this help and exit with code 0.
+
+    --help-tools
+        Print the description of all tools and their configuration parameters and exit with code 0.
 
     --conf <path>
         Path to harness.json5. Optional. Default: <process-cwd>/harness.json5

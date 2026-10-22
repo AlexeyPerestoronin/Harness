@@ -22,6 +22,12 @@ use git::GitModule;
 use terminal::TerminalModule;
 use user::UserModule;
 
+/// Human-readable description of every tool module and its conf parameters.
+///
+/// Printed by `harness.exe --help-tools`. Embedded at compile time from
+/// `crates/tools/help-user.txt`.
+pub const HELP_USER: &str = include_str!("../help-user.txt");
+
 /// JSON Schema descriptor exposed to the agent as one tool.
 #[derive(Debug, Clone)]
 pub struct ToolDescriptor {
@@ -212,4 +218,47 @@ pub fn arg_str(args: &Map<String, Value>, key: &str) -> Result<String, String> {
 /// Optional string argument; missing or null becomes `""`.
 pub fn arg_str_or_empty(args: &Map<String, Value>, key: &str) -> String {
     arg_str(args, key).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use conf::str::keys;
+
+    #[test]
+    fn help_user_covers_modules_keys_and_tools() {
+        assert!(!HELP_USER.is_empty());
+        for module in [
+            keys::TOOL_FS,
+            keys::TOOL_GIT,
+            keys::TOOL_TERMINAL,
+            keys::TOOL_USER,
+        ] {
+            assert!(HELP_USER.contains(module), "missing module {module}");
+        }
+        for key in [
+            keys::AVAILABLE_DIRS,
+            keys::AVAILABLE_FILE_EXTENSIONS,
+            keys::AVAILABLE_FILES,
+            keys::DEPRECATED_DIRS,
+            keys::DEPRECATED_FILES,
+            keys::EXECUTABLE,
+            keys::EXECUTION_LIMIT,
+            keys::CWD_LIST,
+            keys::AVAILABLE_COMMANDS,
+            keys::COMMAND_EXECUTION_LIMIT,
+            keys::INVOKE_EXECUTION_LIMIT,
+        ] {
+            assert!(HELP_USER.contains(key), "missing key {key}");
+        }
+        let names = fs::FsModule::descriptors()
+            .into_iter()
+            .chain(git::GitModule::descriptors())
+            .chain(terminal::TerminalModule::descriptors())
+            .chain(user::UserModule::descriptors())
+            .map(|d| d.name);
+        for name in names {
+            assert!(HELP_USER.contains(&name), "missing tool {name}");
+        }
+    }
 }

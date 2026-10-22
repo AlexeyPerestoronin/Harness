@@ -26,13 +26,8 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match parse_args(&args)? {
-        CliAction::Help => {
-            print!("{HELP}");
-            if !HELP.ends_with('\n') {
-                println!();
-            }
-            Ok(())
-        }
+        CliAction::Help => print_help(HELP),
+        CliAction::HelpTools => print_help(tools::HELP_USER),
         CliAction::ConfNew { path } => {
             conf::write_new_conf(&path).map_err(|e| e.to_string())?;
             Ok(())
@@ -52,4 +47,13 @@ fn start_session(
     let dump_file = log_dir.join("dump.json");
     let mut loop_ = agent_loop::AgentLoop::new(&settings, &log_file, log_dir)?;
     loop_.start(prompt, &dump_file, dump.as_deref())
+}
+
+/// Print embedded help and guarantee a trailing newline.
+fn print_help(text: &str) -> Result<(), String> {
+    print!("{text}");
+    if !text.ends_with('\n') {
+        println!();
+    }
+    Ok(())
 }

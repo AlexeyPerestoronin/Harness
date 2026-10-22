@@ -1,0 +1,236 @@
+harness.exe tools — human reference for tool modules and their configuration.
+
+Printed by `harness.exe --help-tools`. Does not load a conf file, API keys, or
+the network. Exit code is 0.
+
+Enabling modules
+================
+
+Modules are turned on by keys of the `tools` object in harness.json5
+(`tools.<module>`). Each value must be an object.
+
+  missing key     module is not registered (disabled)
+  unknown key     startup error: unknown tool module '<name>'
+
+Known modules: fs, git, terminal, user.
+
+Example:
+
+  "tools": {
+    "fs": { /* fs fields */ },
+    "user": {}
+  }
+
+Here `fs` and `user` are enabled; `git` and `terminal` are not.
+
+
+fs
+==
+
+Purpose: read, write, create, move and delete files and folders; search by
+string or regex; list the current allow-list.
+
+Configuration (`tools.fs`):
+
+  available-dirs — array of strings, optional, default []
+    Directory allow-list. Each entry starts with `r:` (read) or `w:` (write;
+    write implies read). Directories match by absolute-path prefix.
+
+      "available-dirs": ["w:C:/work", "r:C:/docs"]
+
+  available-file-extensions — array of strings, optional, default []
+    Allowed extensions including the leading dot (".md"). Empty list = any
+    extension.
+
+      "available-file-extensions": [".md", ".rs"]
+
+  available-files — array of strings, optional, default []
+    Exact-file allow-list (not a prefix). Prefixes `r:` / `w:` as above.
+
+      "available-files": ["r:C:/secrets/token.txt"]
+
+  deprecated-dirs — array of strings, required (empty list allowed), no default
+    Directory denylist. No `r:` / `w:` prefixes. Excluded from every fs
+    operation. Nesting a deprecated path inside an available directory is
+    allowed; an available path that coincides with or lies inside a
+    deprecated path is a load error.
+
+      "deprecated-dirs": [".git", "target"]
+
+  deprecated-files — array of strings, required (empty list allowed), no default
+    File denylist. No `r:` / `w:` prefixes. Intersection with
+    `available-files` is a load error.
+
+      "deprecated-files": []
+
+Tools:
+  read_file                       Read the contents of a file.
+  write_file                      Write a file.
+  create_file                     Create a file.
+  remove_file                     Delete a file.
+  move_file                       Move a file.
+  list_folder                     List a directory to the given depth.
+  create_folder                   Create a folder.
+  remove_folder                   Delete a folder.
+  move_folder                     Move a folder.
+  find_str                        Search for a string in files.
+  find_str_by_regex               Search for lines matching a regex.
+  find_file_by_str                Find files whose names contain a string.
+  find_files_by_regex             Find files whose names match a regex.
+  list_available_file_extension   List allowed file extensions.
+  list_available_r_dir            List directories available for reading.
+  list_available_w_dir            List directories available for writing.
+  list_available_r_file           List files available for reading.
+  list_available_w_file           List files available for writing.
+
+
+git
+===
+
+Purpose: inspect git tracking, show diffs, apply patches, discard changes.
+Path access uses the fs allow-list. The subprocess is always
+Command::new(executable) from conf — never a hardcoded "git" program.
+
+Configuration (`tools.git`):
+
+  executable — string, required, no default
+    Path or name of the git binary. Must be non-empty. The code never falls
+    back to "git".
+
+      "executable": "C:/Program Files/Git/cmd/git.exe"
+
+  execution-limit — number (seconds), required, no default
+    Timeout for git subprocesses.
+
+      "execution-limit": 120
+
+Tools:
+  is_file_under_git      Check whether a file is tracked by git.
+  apply_diff_patch       Apply a git-style diff patch (`git apply`).
+  get_file_diff          Get the diff for the target file.
+  discard_file_changes   Discard file changes after HEAD.
+
+
+terminal
+========
+
+Purpose: run a whitelisted shell command, run invoke, list allowed commands.
+
+Configuration (`tools.terminal`):
+
+  cwd-list — array of strings, optional, default []
+    Allowed cwd values for run_shell. Match by absolute-path prefix.
+    Separate from available-dirs.
+
+      "cwd-list": ["C:/work"]
+
+  available-commands — array of strings, optional, default []
+    Allowed command names for run_shell. No `r:` / `w:` prefixes.
+    run_invoke does not use this list.
+
+      "available-commands": ["cargo", "findstr"]
+
+  command-execution-limit — number (seconds), required, no default
+    Timeout for run_shell. Also used by request_command_shell_execution
+    (user module) when that tool is allowed to run.
+
+      "command-execution-limit": 120
+
+  invoke-execution-limit — number (seconds), required, no default
+    Timeout for run_invoke.
+
+      "invoke-execution-limit": 120
+
+Tools:
+  run_shell                        Run a command from the whitelist.
+  run_invoke                       Run an invoke command (no whitelist).
+  list_available_shell_commands    List available-commands.
+
+run_shell vs run_invoke vs request_command_shell_execution:
+
+  run_shell
+    Command must be in available-commands. Cwd must match cwd-list.
+    Timeout is command-execution-limit.
+
+  run_invoke
+    No whitelist. Runs {settings.cwd}/.venv/Scripts/python.exe -m invoke
+    (Unix: .venv/bin/python) with the given task name.
+    Timeout is invoke-execution-limit.
+
+  request_command_shell_execution
+    Lives in the user module. Asks the human once; on approval runs the
+    command immediately. Does not add it to available-commands. Needs
+    tools.terminal so command-execution-limit is configured.
+
+
+user
+====
+
+Purpose: ask the human a question and request extra access or a one-shot
+shell command. Confirmations are read from stdin (y / yes / д / да).
+
+Configuration (`tools.user`): no fields. Enable with an empty object:
+
+  "user": {}
+
+Path grants mutate the allow-list owned by fs. Deprecated paths are refused
+and never added.
+
+Tools:
+  ask_user                           Ask the user a question and get the answer.
+  request_read_access_for            Request read access to a folder/file.
+  request_write_access_for           Request write access to a folder/file.
+  request_command_shell_execution    Request permission to run a shell command.
+
+
+Variables
+=========
+
+Any json5 configuration file (the loop file harness.json5 and an agent /
+model file) may have a top-level `vars` object. Placeholders `${vars:<name>}`
+are substituted before json5 parsing.
+
+Each file has its own vars. Values from the loop file are not visible in an
+agent file and vice versa. Nested `${vars:...}` inside vars is an error.
+
+  "vars": {
+    "work-dir": "C:/work",
+    "limit": 120
+  },
+  "cwd": "${vars:work-dir}",
+  "tools": {
+    "git": {
+      "executable": "git",
+      "execution-limit": ${vars:limit}
+    }
+  }
+
+
+Access model
+============
+
+Prefixes:
+  r:   read access
+  w:   write access (implies read)
+
+Used on available-dirs and available-files only. deprecated-* and
+available-commands must not use these prefixes.
+
+Matching:
+  available-dirs              prefix match on the absolute path
+  available-files             exact file (absolute path)
+  available-file-extensions   empty list = any extension; otherwise the
+                              file's extension (with the leading dot)
+                              must be listed
+  deprecated-dirs             excluded from all operations; path-component
+                              prefix (`target` does not block `target2`)
+  deprecated-files            excluded from all operations; exact
+                              absolute path
+
+deprecated-dirs / deprecated-files have no r: / w: prefixes. Intersection
+of deprecated-* with available-* at load time is an error. Nesting a
+deprecated path inside an available directory is allowed (for example
+available `w:C:/proj` and deprecated `C:/proj/target`).
+
+Relative paths in these lists are resolved against the current working
+directory of the process, not settings.cwd.

@@ -1,8 +1,9 @@
 //! Command-line interface for `harness.exe`.
 //!
-//! Parsing is explicit (no clap) so `--help` is the compile-time `help.txt`
-//! and the xor rules for `--prompt` / `--dump` / `--conf-new` are checked in one
-//! place. `--conf` defaults to `<process-cwd>/harness.json5`.
+//! Parsing is explicit (no clap) so `--help` is the compile-time `help.txt`,
+//! `--help-tools` is `tools::HELP_USER`, and the xor rules for `--prompt` /
+//! `--dump` / `--conf-new` are checked in one place. `--conf` defaults to
+//! `<process-cwd>/harness.json5`.
 
 use std::path::PathBuf;
 
@@ -14,6 +15,8 @@ pub const HELP: &str = include_str!("../help.txt");
 pub enum CliAction {
     /// Print [`HELP`] and exit 0.
     Help,
+    /// Print [`tools::HELP_USER`] and exit 0.
+    HelpTools,
     /// Write a conf template and exit.
     ConfNew {
         /// Destination path for the new json5 file.
@@ -37,12 +40,18 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut dump: Option<PathBuf> = None;
     let mut conf_new: Option<PathBuf> = None;
     let mut help = false;
+    let mut help_tools = false;
 
     let mut i = 0;
     while i < args.len() {
         let a = args[i].as_str();
         if a == "--help" || a == "-h" {
             help = true;
+            i += 1;
+            continue;
+        }
+        if a == "--help-tools" {
+            help_tools = true;
             i += 1;
             continue;
         }
@@ -67,6 +76,9 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
 
     if help {
         return Ok(CliAction::Help);
+    }
+    if help_tools {
+        return Ok(CliAction::HelpTools);
     }
 
     let n = [prompt.is_some(), dump.is_some(), conf_new.is_some()]
@@ -114,4 +126,42 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<Option<Strin
         return Ok(Some(rest.to_string()));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn help_tools_flag() {
+        assert_eq!(
+            parse_args(&args(&["--help-tools"])).unwrap(),
+            CliAction::HelpTools
+        );
+    }
+
+    #[test]
+    fn help_tools_ignores_prompt() {
+        assert_eq!(
+            parse_args(&args(&["--help-tools", "--prompt", "x"])).unwrap(),
+            CliAction::HelpTools
+        );
+    }
+
+    #[test]
+    fn help_wins_over_help_tools() {
+        assert_eq!(
+            parse_args(&args(&["--help", "--help-tools"])).unwrap(),
+            CliAction::Help
+        );
+    }
+
+    #[test]
+    fn help_text_mentions_help_tools() {
+        assert!(HELP.contains("--help-tools"));
+    }
 }
