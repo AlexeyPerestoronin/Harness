@@ -2,13 +2,10 @@
 target/
 dist/
 
-#API_KEYs with agents
+#agents
 API_KEY*
 agent-*.json5
-
-# Logs
 .log
-
-# build results
 harness.exe
 harness.json5
+prompt.md
