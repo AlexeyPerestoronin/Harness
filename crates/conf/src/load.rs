@@ -49,8 +49,6 @@ where
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    reject_legacy_root_keys(obj)?;
-
     let cwd = required_string(obj, keys::CWD)?;
     if cwd.trim().is_empty() {
         return Err(ConfError::new(format!(
@@ -345,18 +343,6 @@ fn load_terminal(obj: &serde_json::Map<String, Value>) -> Result<TerminalSetting
         command_execution_limit: required_u64(obj, keys::COMMAND_EXECUTION_LIMIT)?,
         invoke_execution_limit: required_u64(obj, keys::INVOKE_EXECUTION_LIMIT)?,
     })
-}
-
-fn reject_legacy_root_keys(obj: &serde_json::Map<String, Value>) -> Result<(), ConfError> {
-    if obj.contains_key("agent-setting") {
-        return Err(ConfError::new("'agent-setting' was renamed to 'agent'"));
-    }
-    if obj.contains_key("paths") {
-        return Err(ConfError::new(
-            "'paths' was removed; move 'log-folder' into 'agent'",
-        ));
-    }
-    Ok(())
 }
 
 fn log_folder_from_agent(agent_obj: &serde_json::Map<String, Value>) -> Result<String, ConfError> {
