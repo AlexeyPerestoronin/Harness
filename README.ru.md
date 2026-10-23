@@ -26,15 +26,16 @@ harness.exe --help
 harness.exe --help-tools
 harness.exe --version
 harness.exe [--conf <path>] --prompt "<user prompt>"
+harness.exe [--conf <path>] --prompt-file <path to prompt file>
 harness.exe [--conf <path>] --dump "<path to dump file>"
 harness.exe --conf-new "<path to new conf file>"
 ```
 
 Правила:
 
-- `--prompt`, `--dump` и `--conf-new` взаимно исключают друг друга. Один из них обязателен.
+- `--prompt`, `--prompt-file`, `--dump` и `--conf-new` взаимно исключают друг друга. Один из них обязателен.
 - `--conf` необязателен. По умолчанию: `<process-cwd>/harness.json5` (текущая рабочая директория процесса, не `settings.cwd`). Нельзя сочетать с `--conf-new`.
-- `--prompt` начинает новую сессию. `--dump` продолжает сессию из dump-файла (промпт берётся из истории dump). `--conf-new` записывает комментированный JSON5-шаблон и завершается.
+- `--prompt` начинает новую сессию. `--prompt-file` начинает новую сессию, промпт читается из UTF-8 файла. `--dump` продолжает сессию из dump-файла (промпт берётся из истории dump). `--conf-new` записывает комментированный JSON5-шаблон и завершается.
 
 ## Конфиг
 

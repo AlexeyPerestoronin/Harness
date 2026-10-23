@@ -11,7 +11,7 @@ mod cli;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cli::{parse_args, version_line, CliAction, HELP};
+use cli::{parse_args, read_prompt_file, version_line, CliAction, HELP};
 
 fn main() -> ExitCode {
     match run() {
@@ -36,7 +36,18 @@ fn run() -> Result<(), String> {
             conf::write_new_conf(&path).map_err(|e| e.to_string())?;
             Ok(())
         }
-        CliAction::Start { conf, prompt, dump } => start_session(conf, prompt, dump),
+        CliAction::Start {
+            conf,
+            prompt,
+            prompt_file,
+            dump,
+        } => {
+            let prompt = match prompt_file {
+                Some(path) => Some(read_prompt_file(&path)?),
+                None => prompt,
+            };
+            start_session(conf, prompt, dump)
+        }
     }
 }
 
