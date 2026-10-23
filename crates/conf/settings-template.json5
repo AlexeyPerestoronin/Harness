@@ -31,13 +31,8 @@
     },
     // Workspace of the agent (tools, logs, invoke). Must be set explicitly.
     "cwd": "${vars:workspace}",
-    // Paths used by the loop. `log-folder` is relative to `cwd`.
-    "paths": {
-        // Session logs go to `<cwd>/<log-folder>/<YYYY-MM-DD HH-MM>_<vendor>_<model>/`.
-        "log-folder": "${vars:log-folder}"
-    },
-    // Model file, confirmation mode and session limits.
-    "agent-setting": {
+    // Model file, confirmation mode, session limits and log folder.
+    "agent": {
         // Path to an agent file or to a folder with agent files (you will be asked to choose).
         // Relative to the directory of this conf file.
         "config": "${vars:agent-config}",
@@ -48,7 +43,10 @@
         // Session iteration limit. `-1` = unlimited. Fires on iteration limit+1.
         "iteration-limit": ${vars:iteration-limit},
         // Session USD limit. `-1` = unlimited.
-        "USD-limit": ${vars:usd-limit}
+        "USD-limit": ${vars:usd-limit},
+        // Log folder relative to `cwd`. Session logs go to
+        // `<cwd>/<log-folder>/<YYYY-MM-DD HH-MM>_<vendor>_<model>/`.
+        "log-folder": "${vars:log-folder}"
     },
     // Enabled tool modules. Key = module name (`crates/tools/src/<name>.rs`).
     // Missing key → module is not registered. Unknown key → startup error.

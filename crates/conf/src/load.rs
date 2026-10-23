@@ -14,7 +14,7 @@ use serde_json::Value;
 
 /// Load and validate a harness configuration file.
 ///
-/// If `agent-setting.config` is a directory this fails with
+/// If `agent.config` is a directory this fails with
 /// `agent was not selected`. Use [`load_with`] to choose a candidate.
 pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
     load_with(conf_path, |_| Err("agent was not selected".into()))
@@ -22,7 +22,7 @@ pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
 
 /// Load and validate a harness configuration file.
 ///
-/// When `agent-setting.config` is a **file**, `chooser` is not called.
+/// When `agent.config` is a **file**, `chooser` is not called.
 /// When it is a **directory**, `chooser` receives the sorted candidate list
 /// and must return a 0-based index. Session limits (`mode`, `token-limit`,
 /// `iteration-limit`, `USD-limit`) always come from `harness.json5`.
@@ -49,6 +49,8 @@ where
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
 
+    reject_legacy_root_keys(obj)?;
+
     let cwd = required_string(obj, keys::CWD)?;
     if cwd.trim().is_empty() {
         return Err(ConfError::new(format!(
@@ -57,21 +59,11 @@ where
         )));
     }
 
-    let log_folder = match obj.get(keys::PATHS) {
-        Some(paths) => {
-            let paths_obj = expect_object(paths, keys::PATHS)?;
-            match paths_obj.get(keys::LOG_FOLDER) {
-                Some(v) => expect_string(v, keys::LOG_FOLDER)?,
-                None => keys::DEFAULT_LOG_FOLDER.to_string(),
-            }
-        }
-        None => keys::DEFAULT_LOG_FOLDER.to_string(),
-    };
-
     let agent_raw = obj
-        .get(keys::AGENT_SETTING)
-        .ok_or_else(|| ConfError::new(format!("missing '{}'", keys::AGENT_SETTING)))?;
-    let agent_obj = expect_object(agent_raw, keys::AGENT_SETTING)?;
+        .get(keys::AGENT)
+        .ok_or_else(|| ConfError::new(format!("missing '{}'", keys::AGENT)))?;
+    let agent_obj = expect_object(agent_raw, keys::AGENT)?;
+    let log_folder = log_folder_from_agent(agent_obj)?;
     let agent = load_agent(agent_obj, &conf_dir, &mut chooser)?;
 
     let tools = match obj.get(keys::TOOLS) {
@@ -353,6 +345,34 @@ fn load_terminal(obj: &serde_json::Map<String, Value>) -> Result<TerminalSetting
         command_execution_limit: required_u64(obj, keys::COMMAND_EXECUTION_LIMIT)?,
         invoke_execution_limit: required_u64(obj, keys::INVOKE_EXECUTION_LIMIT)?,
     })
+}
+
+fn reject_legacy_root_keys(obj: &serde_json::Map<String, Value>) -> Result<(), ConfError> {
+    if obj.contains_key("agent-setting") {
+        return Err(ConfError::new("'agent-setting' was renamed to 'agent'"));
+    }
+    if obj.contains_key("paths") {
+        return Err(ConfError::new(
+            "'paths' was removed; move 'log-folder' into 'agent'",
+        ));
+    }
+    Ok(())
+}
+
+fn log_folder_from_agent(agent_obj: &serde_json::Map<String, Value>) -> Result<String, ConfError> {
+    match agent_obj.get(keys::LOG_FOLDER) {
+        Some(v) => {
+            let s = expect_string(v, keys::LOG_FOLDER)?;
+            if s.is_empty() {
+                return Err(ConfError::new(format!(
+                    "'{}' must be a non-empty string",
+                    keys::LOG_FOLDER
+                )));
+            }
+            Ok(s)
+        }
+        None => Ok(keys::DEFAULT_LOG_FOLDER.to_string()),
+    }
 }
 
 fn expect_object<'a>(

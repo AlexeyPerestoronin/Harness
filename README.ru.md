@@ -41,8 +41,8 @@ harness.exe --conf-new "<path to new conf file>"
 ### Файл цикла `harness.json5`
 
 - `cwd` — workspace агента (tools, logs, invoke).
-- `paths.log-folder` — папка логов относительно `cwd`.
-- `agent-setting`:
+- `agent.log-folder` — папка логов относительно `cwd`.
+- `agent`:
   - `config` — путь к файлу модели или к папке с такими файлами (будет предложено выбрать). Относительные пути резолвятся от директории этого conf-файла.
   - `mode` — `safe` (спрашивать при превышении лимита) или `auto-accept` (залогировать и продолжить).
   - `token-limit`, `iteration-limit`, `USD-limit` — лимиты сессии; `-1` = без лимита.

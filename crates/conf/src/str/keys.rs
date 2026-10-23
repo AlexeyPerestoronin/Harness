@@ -10,19 +10,15 @@
 
 /// Workspace of the agent (tools, logs, invoke). Required.
 pub const CWD: &str = "cwd";
-/// Object with path-related settings.
-pub const PATHS: &str = "paths";
-/// Relative log-folder name inside `cwd`.
-pub const LOG_FOLDER: &str = "log-folder";
-/// Object with model / mode / session limits.
-pub const AGENT_SETTING: &str = "agent-setting";
+/// Object with model / mode / session limits and log-folder.
+pub const AGENT: &str = "agent";
 /// Object whose keys are tool-module names.
 pub const TOOLS: &str = "tools";
 /// Optional named values substituted before json5 parsing.
 pub const VARS: &str = "vars";
 
 // ---------------------------------------------------------------------------
-// agent-setting
+// agent
 // ---------------------------------------------------------------------------
 
 /// Path to an agent json5 file or a folder of such files, relative to `--conf`.
@@ -35,10 +31,12 @@ pub const TOKEN_LIMIT: &str = "token-limit";
 pub const ITERATION_LIMIT: &str = "iteration-limit";
 /// Session USD limit (`-1` = unlimited).
 pub const USD_LIMIT: &str = "USD-limit";
+/// Relative log-folder name inside `cwd`.
+pub const LOG_FOLDER: &str = "log-folder";
 
-/// `agent-setting.mode` value that asks before exceeding limits.
+/// `agent.mode` value that asks before exceeding limits.
 pub const MODE_SAFE: &str = "safe";
-/// `agent-setting.mode` value that only logs limit breaches.
+/// `agent.mode` value that only logs limit breaches.
 pub const MODE_AUTO_ACCEPT: &str = "auto-accept";
 
 // ---------------------------------------------------------------------------
@@ -114,5 +112,5 @@ pub const INVOKE_EXECUTION_LIMIT: &str = "invoke-execution-limit";
 // Load-time defaults
 // ---------------------------------------------------------------------------
 
-/// Default `paths.log-folder`.
+/// Default `agent.log-folder`.
 pub const DEFAULT_LOG_FOLDER: &str = ".log";

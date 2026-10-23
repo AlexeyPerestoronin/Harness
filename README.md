@@ -41,8 +41,8 @@ Rules:
 ### Loop file `harness.json5`
 
 - `cwd` — agent workspace (tools, logs, invoke).
-- `paths.log-folder` — log folder relative to `cwd`.
-- `agent-setting`:
+- `agent.log-folder` — log folder relative to `cwd`.
+- `agent`:
   - `config` — path to a model file or a folder of model files (you will be asked to choose). Relative paths are resolved against the directory of this conf file.
   - `mode` — `safe` (ask when a limit is exceeded) or `auto-accept` (log and continue).
   - `token-limit`, `iteration-limit`, `USD-limit` — session limits; `-1` = unlimited.

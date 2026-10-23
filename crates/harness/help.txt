@@ -21,7 +21,7 @@ FLAGS:
     --conf <path>
         Path to harness.json5. Optional. Default: <process-cwd>/harness.json5
         (the current working directory of the process, not settings.cwd).
-        Inside it, agent-setting.config may be an agent file or a folder
+        Inside it, agent.config may be an agent file or a folder
         of agent files (you will be asked to choose).
         Cannot be combined with --conf-new.
 
