@@ -93,6 +93,9 @@ pub struct Settings {
     pub agent: AgentSettings,
     /// Enabled tool modules. Missing key = module off.
     pub tools: ToolsSettings,
+    /// Conf JSON after vars substitution, with `agent.config` set to the
+    /// absolute chosen agent file. Written into dump files as `"settings"`.
+    pub source: serde_json::Value,
 }
 
 /// Model identity, resolved API key and session limits.

@@ -3,7 +3,8 @@
 //! Parsing is explicit (no clap) so `--help` is the compile-time `help.txt`,
 //! `--help-tools` is `tools::HELP_USER`, `--version` is `CARGO_PKG_VERSION`,
 //! and the xor rules for `--prompt` / `--prompt-file` / `--dump` / `--conf-new`
-//! are checked in one place. `--conf` defaults to `<process-cwd>/harness.json5`.
+//! are checked in one place. `--conf` defaults to `<process-cwd>/harness.json5`
+//! for a new session and cannot be combined with `--dump`.
 
 use std::path::{Path, PathBuf};
 
@@ -26,8 +27,8 @@ pub enum CliAction {
     },
     /// Start or resume an agent session.
     Start {
-        /// Path to `harness.json5`.
-        conf: PathBuf,
+        /// Path to `harness.json5`. `None` when resuming from dump.
+        conf: Option<PathBuf>,
         /// New-session prompt. `None` when resuming from dump or when the
         /// prompt is supplied via [`Self::Start::prompt_file`].
         prompt: Option<String>,
@@ -119,12 +120,22 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
     if conf_new.is_some() && conf.is_some() {
         return Err("--conf нельзя использовать вместе с --conf-new".to_string());
     }
+    if dump.is_some() && conf.is_some() {
+        return Err(
+            "--conf cannot be used with --dump (configuration is taken from the dump file)"
+                .to_string(),
+        );
+    }
 
     if let Some(path) = conf_new {
         return Ok(CliAction::ConfNew { path });
     }
 
-    let conf = conf.unwrap_or_else(default_conf_path);
+    let conf = if dump.is_some() {
+        None
+    } else {
+        Some(conf.unwrap_or_else(default_conf_path))
+    };
     Ok(CliAction::Start {
         conf,
         prompt,
@@ -189,4 +200,79 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<Option<Strin
         return Ok(Some(rest.to_string()));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn dump_without_conf_is_none() {
+        let action = parse_args(&args(&["--dump", "d.json"])).unwrap();
+        match action {
+            CliAction::Start {
+                conf,
+                prompt,
+                prompt_file,
+                dump,
+            } => {
+                assert!(conf.is_none());
+                assert!(prompt.is_none());
+                assert!(prompt_file.is_none());
+                assert_eq!(dump, Some(PathBuf::from("d.json")));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn conf_with_dump_is_error() {
+        let err = parse_args(&args(&["--conf", "x.json5", "--dump", "d.json"])).unwrap_err();
+        assert_eq!(
+            err,
+            "--conf cannot be used with --dump (configuration is taken from the dump file)"
+        );
+        let err = parse_args(&args(&["--dump=d.json", "--conf=x.json5"])).unwrap_err();
+        assert_eq!(
+            err,
+            "--conf cannot be used with --dump (configuration is taken from the dump file)"
+        );
+    }
+
+    #[test]
+    fn dump_and_prompt_are_xor() {
+        let err = parse_args(&args(&["--dump", "d.json", "--prompt", "p"])).unwrap_err();
+        assert_eq!(
+            err,
+            "--prompt, --prompt-file, --dump и --conf-new взаимоисключающие"
+        );
+        let err = parse_args(&args(&["--dump", "d.json", "--prompt-file", "p.txt"])).unwrap_err();
+        assert_eq!(
+            err,
+            "--prompt, --prompt-file, --dump и --conf-new взаимоисключающие"
+        );
+    }
+
+    #[test]
+    fn prompt_without_conf_uses_default() {
+        let action = parse_args(&args(&["--prompt", "hello"])).unwrap();
+        match action {
+            CliAction::Start {
+                conf,
+                prompt,
+                prompt_file,
+                dump,
+            } => {
+                assert_eq!(conf, Some(default_conf_path()));
+                assert_eq!(prompt.as_deref(), Some("hello"));
+                assert!(prompt_file.is_none());
+                assert!(dump.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
 }

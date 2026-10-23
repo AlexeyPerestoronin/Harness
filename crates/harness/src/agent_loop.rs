@@ -24,6 +24,7 @@ pub struct AgentLoop {
     iteration_limit: i64,
     agent: Box<dyn Agent>,
     agent_config: PathBuf,
+    dump_settings: serde_json::Value,
 }
 
 impl AgentLoop {
@@ -57,6 +58,7 @@ impl AgentLoop {
             iteration_limit: settings.agent.iteration_limit,
             agent,
             agent_config: settings.agent.config_path.clone(),
+            dump_settings: settings.source.clone(),
         })
     }
 
@@ -92,6 +94,7 @@ impl AgentLoop {
         if let Some(src) = source_dump {
             self.logger
                 .log_line(&format!("- continue from dump: {}", src.display()));
+            self.logger.log_line("- settings: from dump");
         }
         self.logger.log_line("");
         self.logger.log_line("# Iterations:");
@@ -127,6 +130,7 @@ impl AgentLoop {
 
             let stop = self.agent.iteration(prompt.as_deref())?;
             self.agent.dump_session(dump_file)?;
+            crate::dump_settings::embed(dump_file, &self.dump_settings)?;
             if stop {
                 self.logger.log_line("# Session results:");
                 self.agent.finish();

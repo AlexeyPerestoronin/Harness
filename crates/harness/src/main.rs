@@ -7,6 +7,7 @@ mod agent_loop;
 mod agent_select;
 mod agents;
 mod cli;
+mod dump_settings;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -52,16 +53,27 @@ fn run() -> Result<(), String> {
 }
 
 fn start_session(
-    conf_path: PathBuf,
+    conf_path: Option<PathBuf>,
     prompt: Option<String>,
     dump: Option<PathBuf>,
 ) -> Result<(), String> {
-    let settings = conf::load_with(&conf_path, agent_select::choose).map_err(|e| e.to_string())?;
+    let (settings, source_dump) = if let Some(dump_path) = dump {
+        let settings_value = dump_settings::extract(&dump_path)?;
+        let conf_dir = dump_settings::conf_dir_of(&settings_value)?;
+        let settings = conf::load_from_value(settings_value, &conf_dir, agent_select::choose)
+            .map_err(|e| e.to_string())?;
+        (settings, Some(dump_path))
+    } else {
+        let conf_path = conf_path.ok_or_else(|| "missing --conf".to_string())?;
+        let settings =
+            conf::load_with(&conf_path, agent_select::choose).map_err(|e| e.to_string())?;
+        (settings, None)
+    };
     let log_dir = agent_loop::session_dir(&settings)?;
     let log_file = log_dir.join("log.md");
     let dump_file = log_dir.join("dump.json");
     let mut loop_ = agent_loop::AgentLoop::new(&settings, &log_file, log_dir)?;
-    loop_.start(prompt, &dump_file, dump.as_deref())
+    loop_.start(prompt, &dump_file, source_dump.as_deref())
 }
 
 /// Print embedded help and guarantee a trailing newline.

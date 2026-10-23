@@ -15,7 +15,7 @@ mod types;
 mod vars;
 
 pub use error::ConfError;
-pub use load::{load, load_model, load_with};
+pub use load::{load, load_from_value, load_model, load_with};
 pub use template::{template_text, write_new_conf};
 pub use types::{
     AgentCandidate, AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings,

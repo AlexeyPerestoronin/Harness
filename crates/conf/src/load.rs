@@ -26,7 +26,7 @@ pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
 /// When it is a **directory**, `chooser` receives the sorted candidate list
 /// and must return a 0-based index. Session limits (`mode`, `token-limit`,
 /// `iteration-limit`, `USD-limit`) always come from `harness.json5`.
-pub fn load_with<F>(conf_path: &Path, mut chooser: F) -> Result<Settings, ConfError>
+pub fn load_with<F>(conf_path: &Path, chooser: F) -> Result<Settings, ConfError>
 where
     F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
 {
@@ -43,39 +43,75 @@ where
     })?;
     let text = crate::vars::substitute(&text, &conf_path.display().to_string())?;
     let root: Value = json5::from_str(&text)?;
-    let obj = expect_object(&root, &conf_path.display().to_string())?;
+    expect_object(&root, &conf_path.display().to_string())?;
     let conf_dir = conf_path
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    let cwd = required_string(obj, keys::CWD)?;
-    if cwd.trim().is_empty() {
-        return Err(ConfError::new(format!(
-            "'{}' must be set explicitly",
-            keys::CWD
-        )));
-    }
+    load_from_value(root, &conf_dir, chooser)
+}
 
-    let agent_raw = obj
-        .get(keys::AGENT)
-        .ok_or_else(|| ConfError::new(format!("missing '{}'", keys::AGENT)))?;
-    let agent_obj = expect_object(agent_raw, keys::AGENT)?;
-    let log_folder = log_folder_from_agent(agent_obj)?;
-    let agent = load_agent(agent_obj, &conf_dir, &mut chooser)?;
+/// Validate a conf JSON object (already after vars substitution) into [`Settings`].
+///
+/// `vars` is not substituted again. `conf_dir` resolves a relative `agent.config`.
+/// After a successful load, [`Settings::source`] is `root` with `agent.config`
+/// rewritten to the absolute chosen agent file.
+pub fn load_from_value<F>(
+    mut root: Value,
+    conf_dir: &Path,
+    mut chooser: F,
+) -> Result<Settings, ConfError>
+where
+    F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
+{
+    let (cwd, log_folder, agent, tools) = {
+        let obj = expect_object(&root, "settings")?;
+        let cwd = required_string(obj, keys::CWD)?;
+        if cwd.trim().is_empty() {
+            return Err(ConfError::new(format!(
+                "'{}' must be set explicitly",
+                keys::CWD
+            )));
+        }
 
-    let tools = match obj.get(keys::TOOLS) {
-        Some(v) => load_tools(expect_object(v, keys::TOOLS)?)?,
-        None => ToolsSettings::default(),
+        let agent_raw = obj
+            .get(keys::AGENT)
+            .ok_or_else(|| ConfError::new(format!("missing '{}'", keys::AGENT)))?;
+        let agent_obj = expect_object(agent_raw, keys::AGENT)?;
+        let log_folder = log_folder_from_agent(agent_obj)?;
+        let agent = load_agent(agent_obj, conf_dir, &mut chooser)?;
+
+        let tools = match obj.get(keys::TOOLS) {
+            Some(v) => load_tools(expect_object(v, keys::TOOLS)?)?,
+            None => ToolsSettings::default(),
+        };
+        (cwd, log_folder, agent, tools)
     };
+
+    rewrite_agent_config(&mut root, &agent.config_path);
 
     Ok(Settings {
         cwd: PathBuf::from(cwd),
-        conf_dir,
+        conf_dir: conf_dir.to_path_buf(),
         log_folder,
         agent,
         tools,
+        source: root,
     })
+}
+
+fn rewrite_agent_config(root: &mut Value, config_path: &Path) {
+    if let Some(agent) = root
+        .as_object_mut()
+        .and_then(|o| o.get_mut(keys::AGENT))
+        .and_then(|v| v.as_object_mut())
+    {
+        agent.insert(
+            keys::CONFIG.to_string(),
+            Value::String(config_path.to_string_lossy().into_owned()),
+        );
+    }
 }
 
 /// Load a model json5 file into [`AgentSettings`].
@@ -144,6 +180,11 @@ where
         choose_from_dir(&model_path, chooser)?
     } else {
         model_path
+    };
+    let model_path = if model_path.is_absolute() {
+        model_path
+    } else {
+        std::env::current_dir()?.join(model_path)
     };
     let model_obj = match read_model_object(&model_path) {
         Ok(obj) => obj,
@@ -493,4 +534,112 @@ fn required_deprecated_list(
         }
     }
     Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "harness-conf-dump-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_agent(dir: &Path) -> PathBuf {
+        let path = dir.join("grok-4.6.json5");
+        fs::write(
+            &path,
+            r#"{
+  "vendor": "SpaceXAI",
+  "name": "Grok 4.6",
+  "api-key": "test-key"
+}
+"#,
+        )
+        .unwrap();
+        path
+    }
+
+    fn json_path(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+
+    #[test]
+    fn load_from_value_matches_load_with_on_template() {
+        let dir = unique_dir();
+        write_agent(&dir);
+        let workspace = json_path(&dir);
+        let mut text = crate::template::template_text();
+        text = text.replace("<workspace path>", &workspace);
+        text = text.replace("<work directory>", &workspace);
+        let conf_path = dir.join("harness.json5");
+        fs::write(&conf_path, &text).unwrap();
+
+        let from_disk = load_with(&conf_path, |_| unreachable!("config is a file")).unwrap();
+        let config = from_disk.source["agent"]["config"].as_str().unwrap();
+        let config_path = PathBuf::from(config);
+        assert!(config_path.is_absolute(), "{config}");
+        assert!(config_path.is_file(), "{config}");
+
+        let conf_dir = config_path.parent().unwrap();
+        let from_value = load_from_value(from_disk.source.clone(), conf_dir, |_| {
+            unreachable!("config is a file")
+        })
+        .unwrap();
+
+        assert_eq!(from_disk.cwd, from_value.cwd);
+        assert_eq!(from_disk.log_folder, from_value.log_folder);
+        assert_eq!(from_disk.agent.token_limit, from_value.agent.token_limit);
+        assert_eq!(
+            from_disk.agent.iteration_limit,
+            from_value.agent.iteration_limit
+        );
+        assert_eq!(from_disk.agent.usd_limit, from_value.agent.usd_limit);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn source_rewrites_relative_config_to_absolute_file() {
+        let dir = unique_dir();
+        let agent = write_agent(&dir);
+        let conf_path = dir.join("harness.json5");
+        fs::write(
+            &conf_path,
+            format!(
+                r#"{{
+  "cwd": "{}",
+  "agent": {{
+    "config": "grok-4.6.json5",
+    "mode": "safe",
+    "token-limit": 100,
+    "iteration-limit": 10,
+    "USD-limit": 1.5,
+    "log-folder": "logs"
+  }}
+}}
+"#,
+                json_path(&dir)
+            ),
+        )
+        .unwrap();
+
+        let settings = load_with(&conf_path, |_| unreachable!("config is a file")).unwrap();
+        let config = settings.source["agent"]["config"].as_str().unwrap();
+        let config_path = PathBuf::from(config);
+        assert!(config_path.is_absolute(), "{config}");
+        assert_eq!(config_path, agent);
+        assert_eq!(settings.log_folder, "logs");
+        assert_eq!(settings.agent.token_limit, 100);
+        assert_eq!(settings.agent.iteration_limit, 10);
+        assert_eq!(settings.agent.usd_limit, 1.5);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
