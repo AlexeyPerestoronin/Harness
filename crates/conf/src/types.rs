@@ -2,6 +2,7 @@
 //!
 //! Other crates receive these structures and never open json5 files themselves.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::error::ConfError;
@@ -138,6 +139,10 @@ pub struct ToolsSettings {
     pub terminal: Option<TerminalSettings>,
     /// User-interaction tools.
     pub user: Option<UserSettings>,
+    /// Skills catalog (`get_skill_explanation`).
+    pub skills: Option<SkillsSettings>,
+    /// Roles catalog (`get_role_explanation`).
+    pub roles: Option<RolesSettings>,
 }
 
 /// Settings for the `fs` module.
@@ -180,3 +185,35 @@ pub struct TerminalSettings {
 /// Settings for the `user` module. The module has no fields.
 #[derive(Debug, Clone, Default)]
 pub struct UserSettings {}
+
+/// Settings for the `skills` module. `items` is empty when enabled as `{}`.
+#[derive(Debug, Clone, Default)]
+pub struct SkillsSettings {
+    /// Named skills. Keys are `skill_name` values accepted by the tool.
+    pub items: BTreeMap<String, SkillEntry>,
+}
+
+/// One skill: short description (tool list) and path to the full text.
+#[derive(Debug, Clone)]
+pub struct SkillEntry {
+    /// Non-empty short description embedded into the tool descriptor.
+    pub description: String,
+    /// Absolute path to the skill file. Re-read on every tool call.
+    pub file: PathBuf,
+}
+
+/// Settings for the `roles` module. `items` is empty when enabled as `{}`.
+#[derive(Debug, Clone, Default)]
+pub struct RolesSettings {
+    /// Named roles. Keys are `role_name` values accepted by the tool.
+    pub items: BTreeMap<String, RoleEntry>,
+}
+
+/// One role: short description (tool list) and path to the full text.
+#[derive(Debug, Clone)]
+pub struct RoleEntry {
+    /// Non-empty short description embedded into the tool descriptor.
+    pub description: String,
+    /// Absolute path to the role file. Re-read on every tool call.
+    pub file: PathBuf,
+}

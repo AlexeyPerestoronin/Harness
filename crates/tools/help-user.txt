@@ -12,7 +12,7 @@ Modules are turned on by keys of the `tools` object in harness.json5
   missing key     module is not registered (disabled)
   unknown key     startup error: unknown tool module '<name>'
 
-Known modules: fs, git, terminal, user.
+Known modules: fs, git, terminal, user, skills, roles.
 
 Example:
 
@@ -181,6 +181,62 @@ Tools:
   request_read_access_for            Request read access to a folder/file.
   request_write_access_for           Request write access to a folder/file.
   request_command_shell_execution    Request permission to run a shell command.
+
+
+skills
+======
+
+Purpose: return the full text of a named skill from a file. Short
+descriptions go into the tool descriptor so the agent can pick a name;
+the file is read only when the tool is called.
+
+Configuration (`tools.skills`): object whose keys are skill names
+(`A-Z a-z 0-9 _ - .`). Missing key disables the module. Empty object
+`{}` enables the tool with no skills.
+
+Each entry:
+
+  description — string, required, non-empty
+    Short text listed in the get_skill_explanation descriptor.
+
+  file — string, required, non-empty
+    Path to the skill text file. Relative paths are resolved against the
+    directory of harness.json5. The file is checked at startup: missing
+    path or a directory fails conf load
+    (`error → skill-file '<absolute path>' doesn't find`).
+
+      "skills": {
+        "rust-programmer": {
+          "description": "Used when programming in Rust",
+          "file": "harness/skills/rust-programmer.md"
+        }
+      }
+
+The module does not use the fs allow-list. Files are re-read from disk
+on every call.
+
+Tools:
+  get_skill_explanation    Return the full text of a skill by name.
+
+
+roles
+=====
+
+Purpose: return the full text of a named role from a file. Same shape as
+skills.
+
+Configuration (`tools.roles`): object whose keys are role names
+(`A-Z a-z 0-9 _ - .`). Missing key disables the module. Empty object
+`{}` enables the tool with no roles.
+
+Each entry: `description` and `file`, same rules as skills. Missing file
+at startup: `error → role-file '<absolute path>' doesn't find`.
+
+The module does not use the fs allow-list. Files are re-read from disk
+on every call.
+
+Tools:
+  get_role_explanation     Return the full text of a role by name.
 
 
 Variables

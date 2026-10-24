@@ -104,6 +104,16 @@
             "invoke-execution-limit": ${vars:invoke-execution-limit}
         },
         // User interaction: ask_user, request_*_access_for, request_command_shell_execution.
-        "user": {}
+        "user": {},
+        // Skills catalog. Empty object = module on, no skills.
+        // Add an entry as: "<name>": { "description": "<short text>", "file": "<path>" }.
+        // `file` is relative to this conf file's directory, or absolute.
+        // Missing files fail conf load (`error → skill-file '...' doesn't find`).
+        "skills": {
+        },
+        // Roles catalog. Same shape as skills (`description` + `file`).
+        // Tool: get_role_explanation. Files are checked at startup.
+        "roles": {
+        }
     }
 }

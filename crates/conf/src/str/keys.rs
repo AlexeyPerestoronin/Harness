@@ -68,6 +68,10 @@ pub const TOOL_GIT: &str = "git";
 pub const TOOL_TERMINAL: &str = "terminal";
 /// User-interaction tools module.
 pub const TOOL_USER: &str = "user";
+/// Skills catalog module (`get_skill_explanation`).
+pub const TOOL_SKILLS: &str = "skills";
+/// Roles catalog module (`get_role_explanation`).
+pub const TOOL_ROLES: &str = "roles";
 
 // ---------------------------------------------------------------------------
 // tools.fs
@@ -107,6 +111,15 @@ pub const AVAILABLE_COMMANDS: &str = "available-commands";
 pub const COMMAND_EXECUTION_LIMIT: &str = "command-execution-limit";
 /// Timeout in seconds for `run_invoke`. Required if `terminal` is enabled.
 pub const INVOKE_EXECUTION_LIMIT: &str = "invoke-execution-limit";
+
+// ---------------------------------------------------------------------------
+// tools.skills / tools.roles entries
+// ---------------------------------------------------------------------------
+
+/// Short description of a skill or role (embedded into the tool descriptor).
+pub const DESCRIPTION: &str = "description";
+/// Path to the text file with the full skill or role body.
+pub const FILE: &str = "file";
 
 // ---------------------------------------------------------------------------
 // Load-time defaults

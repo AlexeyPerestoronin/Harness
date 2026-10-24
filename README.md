@@ -70,6 +70,7 @@ A missing key in `tools` means the module is not registered. An unknown key is a
 - **git** — `executable`, `execution-limit`.
 - **terminal** — `run_shell`, `run_invoke`, `list_available_shell_commands`; fields `cwd-list`, `available-commands`, timeouts `command-execution-limit` and `invoke-execution-limit`.
 - **user** — `ask_user`, `request_read_access_for`, `request_write_access_for`, `request_command_shell_execution`.
+- **skills** / **roles** — the agent can request a skill or role by name (`get_skill_explanation` / `get_role_explanation`).
 
 ## CI
 

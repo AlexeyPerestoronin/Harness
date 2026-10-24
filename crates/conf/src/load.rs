@@ -1,5 +1,6 @@
 //! Load `harness.json5` and the nested model file into [`crate::Settings`].
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,8 +8,9 @@ use crate::error::ConfError;
 use crate::scan::{scan_agent_dir, SkippedFile};
 use crate::str::keys;
 use crate::types::{
-    AgentCandidate, AgentKind, AgentSettings, FsSettings, GitSettings, Mode, Settings,
-    TerminalSettings, ToolsSettings, UserSettings,
+    AgentCandidate, AgentKind, AgentSettings, FsSettings, GitSettings, Mode, RoleEntry,
+    RolesSettings, Settings, SkillEntry, SkillsSettings, TerminalSettings, ToolsSettings,
+    UserSettings,
 };
 use serde_json::Value;
 
@@ -83,7 +85,7 @@ where
         let agent = load_agent(agent_obj, conf_dir, &mut chooser)?;
 
         let tools = match obj.get(keys::TOOLS) {
-            Some(v) => load_tools(expect_object(v, keys::TOOLS)?)?,
+            Some(v) => load_tools(expect_object(v, keys::TOOLS)?, conf_dir)?,
             None => ToolsSettings::default(),
         };
         (cwd, log_folder, agent, tools)
@@ -314,7 +316,10 @@ fn resolve_api_key(model_obj: &serde_json::Map<String, Value>) -> Result<String,
     Ok(trimmed.to_string())
 }
 
-fn load_tools(obj: &serde_json::Map<String, Value>) -> Result<ToolsSettings, ConfError> {
+fn load_tools(
+    obj: &serde_json::Map<String, Value>,
+    conf_dir: &Path,
+) -> Result<ToolsSettings, ConfError> {
     let mut settings = ToolsSettings::default();
     for (name, value) in obj {
         let module = expect_object(value, name)?;
@@ -326,6 +331,10 @@ fn load_tools(obj: &serde_json::Map<String, Value>) -> Result<ToolsSettings, Con
             settings.terminal = Some(load_terminal(module)?);
         } else if name == keys::TOOL_USER {
             settings.user = Some(UserSettings {});
+        } else if name == keys::TOOL_SKILLS {
+            settings.skills = Some(load_skills(module, conf_dir)?);
+        } else if name == keys::TOOL_ROLES {
+            settings.roles = Some(load_roles(module, conf_dir)?);
         } else {
             return Err(ConfError::new(format!("unknown tool module '{name}'")));
         }
@@ -384,6 +393,93 @@ fn load_terminal(obj: &serde_json::Map<String, Value>) -> Result<TerminalSetting
         command_execution_limit: required_u64(obj, keys::COMMAND_EXECUTION_LIMIT)?,
         invoke_execution_limit: required_u64(obj, keys::INVOKE_EXECUTION_LIMIT)?,
     })
+}
+
+fn load_skills(
+    obj: &serde_json::Map<String, Value>,
+    conf_dir: &Path,
+) -> Result<SkillsSettings, ConfError> {
+    let items = load_named_files(obj, conf_dir, "skill")?
+        .into_iter()
+        .map(|(name, (description, file))| (name, SkillEntry { description, file }))
+        .collect();
+    Ok(SkillsSettings { items })
+}
+
+fn load_roles(
+    obj: &serde_json::Map<String, Value>,
+    conf_dir: &Path,
+) -> Result<RolesSettings, ConfError> {
+    let items = load_named_files(obj, conf_dir, "role")?
+        .into_iter()
+        .map(|(name, (description, file))| (name, RoleEntry { description, file }))
+        .collect();
+    Ok(RolesSettings { items })
+}
+
+fn load_named_files(
+    obj: &serde_json::Map<String, Value>,
+    conf_dir: &Path,
+    kind: &str,
+) -> Result<BTreeMap<String, (String, PathBuf)>, ConfError> {
+    let mut items = BTreeMap::new();
+    for (name, value) in obj {
+        if !is_catalog_name(name) {
+            return Err(ConfError::new(format!("invalid {kind} name '{name}'")));
+        }
+        let entry = expect_object(value, name)?;
+        for key in entry.keys() {
+            if key != keys::DESCRIPTION && key != keys::FILE {
+                return Err(ConfError::new(format!(
+                    "unknown key '{key}' in {kind} '{name}'"
+                )));
+            }
+        }
+        let description = required_string(entry, keys::DESCRIPTION)?;
+        if description.is_empty() {
+            return Err(ConfError::new(format!(
+                "'{}' must be a non-empty string",
+                keys::DESCRIPTION
+            )));
+        }
+        let file_raw = required_string(entry, keys::FILE)?;
+        if file_raw.is_empty() {
+            return Err(ConfError::new(format!(
+                "'{}' must be a non-empty string",
+                keys::FILE
+            )));
+        }
+        let file = resolve_conf_path(conf_dir, &file_raw)?;
+        if !file.is_file() {
+            return Err(ConfError::new(format!(
+                "error → {kind}-file '{}' doesn't find",
+                file.display()
+            )));
+        }
+        items.insert(name.clone(), (description, file));
+    }
+    Ok(items)
+}
+
+fn is_catalog_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+}
+
+fn resolve_conf_path(conf_dir: &Path, raw: &str) -> Result<PathBuf, ConfError> {
+    let path = PathBuf::from(raw);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        conf_dir.join(path)
+    };
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
 }
 
 fn log_folder_from_agent(agent_obj: &serde_json::Map<String, Value>) -> Result<String, ConfError> {

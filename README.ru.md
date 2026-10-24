@@ -70,6 +70,7 @@ harness.exe --conf-new "<path to new conf file>"
 - **git** — `executable`, `execution-limit`.
 - **terminal** — `run_shell`, `run_invoke`, `list_available_shell_commands`; поля `cwd-list`, `available-commands`, таймауты `command-execution-limit` и `invoke-execution-limit`.
 - **user** — `ask_user`, `request_read_access_for`, `request_write_access_for`, `request_command_shell_execution`.
+- **skills** / **roles** — агент может запросить skill или role по имени (`get_skill_explanation` / `get_role_explanation`).
 
 ## CI
 

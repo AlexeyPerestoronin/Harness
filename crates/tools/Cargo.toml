@@ -2,7 +2,7 @@
 name = "tools"
 version.workspace = true
 edition.workspace = true
-description = "Agent tool modules (fs, git, terminal, user)."
+description = "Agent tool modules (fs, git, terminal, user, skills, roles)."
 
 [dependencies]
 # Typed tool-module settings produced by the conf crate.
