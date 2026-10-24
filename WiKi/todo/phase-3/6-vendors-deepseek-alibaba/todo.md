@@ -93,15 +93,16 @@
 Не менять: `vendor_request.rs` (только **использовать** его API), `xai.rs`/`google.rs`/`claude.rs` (кроме случая общего OpenAI-парсера, вынесенного в новый файл, без изменения поведения xAI), CLI, tools, шаблон `harness.json5`.
 
 ## Проверка корректности решения
-1. `cargo test --workspace`. Живые ключи и сеть не использовать.
-2. Тесты `conf`: все пять пар vendor+name резолвятся; неизвестное имя — ошибка; json5 с `rpm: -1` и с `rpm: 1500` грузятся `load_model`.
-3. Unit-тесты парсеров на фикстурах JSON (без HTTP):
+1. Тесты `conf`: все пять пар vendor+name резолвятся; неизвестное имя — ошибка; json5 с `rpm: -1` и с `rpm: 1500` грузятся `load_model`.
+2. Unit-тесты парсеров на фикстурах JSON (без HTTP):
    - DeepSeek usage с `prompt_cache_hit_tokens` → `cached_tokens` и usd (uncached * 0.14 + cached * cache_price + output * 0.28) / 1e6;
    - DeepSeek без cache-полей → cached=0, usd = input/1e6*input_price + output/1e6*output_price;
    - Qwen-Max с tool_calls → имена/id/arguments;
    - reasoning у R1 не теряется в лог-ветке (хотя бы поле извлекается).
-4. `AgentLoop` компилируется с новыми ветками. Grep: в `deepseek.rs`/`alibaba.rs` нет собственного `for _ in 1..=24` и нет `sleep(15`.
-5. Ручной шаг не обязателен (нужны ключи). Если ключ есть — `--prompt ping` на turbo/V3, в логе не пустой `cached` на второй итерации с tools — наблюдение в `result.md`.
+3. `AgentLoop` компилируется с новыми ветками. Grep: в `deepseek.rs`/`alibaba.rs` нет собственного `for _ in 1..=24` и нет `sleep(15`.
+4. Проверить работоспособность решения "на боевом посту" для DeepSeek при помощи тестового API-ключа (см. файл `API_DEEP_SEEK`):
+   - запросы должны отправляться и возвращаться с корректным ответом (не ошибка)
+   - поля кэширования учитываются правильно
 
 # Дополнительные указания
 1. Экономь токены: читай минимум необходимого; правки вноси через patch.
