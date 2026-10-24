@@ -41,6 +41,16 @@ pub enum AgentKind {
         /// API model id, e.g. `claude-sonnet-5-5`.
         api_model: String,
     },
+    /// DeepSeek OpenAI-compatible chat completions (`deepseek-*`).
+    DeepSeek {
+        /// API model id, e.g. `deepseek-chat`.
+        api_model: String,
+    },
+    /// AliBaba DashScope OpenAI-compatible chat completions (`qwen-*`).
+    Alibaba {
+        /// API model id, e.g. `qwen-max`.
+        api_model: String,
+    },
 }
 
 impl AgentKind {
@@ -62,6 +72,21 @@ impl AgentKind {
             ("Claude", "Claude Sonnet 5.5") => Ok(AgentKind::Claude {
                 api_model: "claude-sonnet-5-5".into(),
             }),
+            ("DeepSeek", "DeepSeek-V3") => Ok(AgentKind::DeepSeek {
+                api_model: "deepseek-chat".into(),
+            }),
+            ("DeepSeek", "DeepSeek-R1") => Ok(AgentKind::DeepSeek {
+                api_model: "deepseek-reasoner".into(),
+            }),
+            ("AliBaba", "Qwen-Turbo") => Ok(AgentKind::Alibaba {
+                api_model: "qwen-turbo".into(),
+            }),
+            ("AliBaba", "Qwen-Plus") => Ok(AgentKind::Alibaba {
+                api_model: "qwen-plus".into(),
+            }),
+            ("AliBaba", "Qwen-Max") => Ok(AgentKind::Alibaba {
+                api_model: "qwen-max".into(),
+            }),
             _ => Err(ConfError::new(format!("unknown agent: {vendor} {name}"))),
         }
     }
@@ -75,7 +100,7 @@ impl AgentKind {
 pub struct AgentCandidate {
     /// Absolute path to the agent file.
     pub path: PathBuf,
-    /// Vendor string from the file (`SpaceXAI` / `GoogleAI` / `Claude`).
+    /// Vendor string from the file (`SpaceXAI` / `GoogleAI` / `Claude` / `DeepSeek` / `AliBaba`).
     pub vendor: String,
     /// Display name from the file (`Grok 4.6`, ...).
     pub name: String,
@@ -102,7 +127,7 @@ pub struct Settings {
 /// Model identity, resolved API key and session limits.
 #[derive(Debug, Clone)]
 pub struct AgentSettings {
-    /// Vendor string from the model file (`SpaceXAI` / `GoogleAI` / `Claude`).
+    /// Vendor string from the model file (`SpaceXAI` / `GoogleAI` / `Claude` / `DeepSeek` / `AliBaba`).
     pub vendor: String,
     /// Display name from the model file (`Grok 4.6`, ...).
     pub name: String,
@@ -216,4 +241,43 @@ pub struct RoleEntry {
     pub description: String,
     /// Absolute path to the role file. Re-read on every tool call.
     pub file: PathBuf,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn api_model(kind: AgentKind) -> String {
+        match kind {
+            AgentKind::Xai { api_model }
+            | AgentKind::Google { api_model }
+            | AgentKind::Claude { api_model }
+            | AgentKind::DeepSeek { api_model }
+            | AgentKind::Alibaba { api_model } => api_model,
+        }
+    }
+
+    #[test]
+    fn from_vendor_name_resolves_known_pairs() {
+        let cases = [
+            ("SpaceXAI", "Grok 4.6", "grok-4.6"),
+            ("GoogleAI", "Gemini 3.8 Flash", "gemini-3.8-flash"),
+            ("Claude", "Claude Sonnet 5.5", "claude-sonnet-5-5"),
+            ("DeepSeek", "DeepSeek-V3", "deepseek-chat"),
+            ("DeepSeek", "DeepSeek-R1", "deepseek-reasoner"),
+            ("AliBaba", "Qwen-Turbo", "qwen-turbo"),
+            ("AliBaba", "Qwen-Plus", "qwen-plus"),
+            ("AliBaba", "Qwen-Max", "qwen-max"),
+        ];
+        for (vendor, name, model) in cases {
+            let kind = AgentKind::from_vendor_name(vendor, name).unwrap();
+            assert_eq!(api_model(kind), model, "{vendor} {name}");
+        }
+    }
+
+    #[test]
+    fn from_vendor_name_rejects_unknown_pair() {
+        let err = AgentKind::from_vendor_name("DeepSeek", "Nope").unwrap_err();
+        assert_eq!(err.to_string(), "unknown agent: DeepSeek Nope");
+    }
 }

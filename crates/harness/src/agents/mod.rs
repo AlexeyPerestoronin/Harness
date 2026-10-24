@@ -1,4 +1,4 @@
-//! Vendor-specific HTTP agents (xAI Grok, Google Gemini and Anthropic Claude).
+//! Vendor-specific HTTP agents (xAI, Google, Claude, DeepSeek and AliBaba).
 //!
 //! There is no official Rust SDK; they talk REST. The [`Agent`] trait matches
 //! Python `IAgent`: one iteration, finish/stats, dump/reload. The API key is
@@ -10,17 +10,22 @@ use std::sync::Arc;
 use logger::Logger;
 use tools::{ToolDescriptor, ToolRegistry};
 
+mod alibaba;
 mod claude;
+mod deepseek;
 mod google;
+mod openai_compat;
 mod xai;
 
+pub use alibaba::AlibabaAgent;
 pub use claude::ClaudeAgent;
+pub use deepseek::DeepSeekAgent;
 pub use google::GoogleAgent;
 pub use xai::XaiAgent;
 
 /// Contract implemented by vendor agents.
 pub trait Agent {
-    /// Vendor identifier (`SpaceXAI` / `GoogleAI` / `Claude`).
+    /// Vendor identifier (`SpaceXAI` / `GoogleAI` / `Claude` / `DeepSeek` / `AliBaba`).
     fn vendor(&self) -> &str;
     /// Display model name from the conf.
     fn model(&self) -> &str;
@@ -51,7 +56,7 @@ pub struct UsageStats {
     pub input_tokens: i64,
     /// Completion tokens.
     pub output_tokens: i64,
-    /// Cached prompt tokens (xAI / Google).
+    /// Cached prompt tokens (xAI / Google / DeepSeek / AliBaba).
     pub cached_tokens: i64,
     /// Accumulated USD cost when the vendor reports it.
     pub total_cost_usd: f64,

@@ -4,7 +4,7 @@
 
 ## Что это
 
-Нативный agent harness на Rust: CLI `harness.exe`, цикл агента, HTTP-агенты xAI (Grok), Google (Gemini) и Claude, реестр инструментов.
+Нативный agent harness на Rust: CLI `harness.exe`, цикл агента, HTTP-агенты xAI (Grok), Google (Gemini), Claude, DeepSeek и AliBaba (Qwen), реестр инструментов.
 
 ## Сборка
 
@@ -60,6 +60,8 @@ harness.exe --conf-new "<path to new conf file>"
 - `SpaceXAI` / `Grok 4.6`
 - `GoogleAI` / `Gemini 3.8 Flash`, `Gemini 3.5 Flash Lite`, `Gemini 3.1 Flash Lite`
 - `Claude` / `Claude Sonnet 5.5`
+- `DeepSeek` / `DeepSeek-V3`, `DeepSeek-R1`
+- `AliBaba` / `Qwen-Turbo`, `Qwen-Plus`, `Qwen-Max`
 
 ## Инструменты
 

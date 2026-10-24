@@ -4,7 +4,7 @@
 
 ## What this is
 
-Native agent harness in Rust: CLI `harness.exe`, an agent loop, HTTP agents for xAI (Grok), Google (Gemini) and Claude, and a tool registry.
+Native agent harness in Rust: CLI `harness.exe`, an agent loop, HTTP agents for xAI (Grok), Google (Gemini), Claude, DeepSeek and AliBaba (Qwen), and a tool registry.
 
 ## Build
 
@@ -60,6 +60,8 @@ Known agents:
 - `SpaceXAI` / `Grok 4.6`
 - `GoogleAI` / `Gemini 3.8 Flash`, `Gemini 3.5 Flash Lite`, `Gemini 3.1 Flash Lite`
 - `Claude` / `Claude Sonnet 5.5`
+- `DeepSeek` / `DeepSeek-V3`, `DeepSeek-R1`
+- `AliBaba` / `Qwen-Turbo`, `Qwen-Plus`, `Qwen-Max`
 
 ## Tools
 

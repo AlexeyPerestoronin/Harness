@@ -1,0 +1,12 @@
+{
+    "vendor": "AliBaba",
+    "name": "Qwen-Plus",
+    // api-key or path to file with api-key
+    "api-key": "api-key or path to file with api-key",
+    "token-limit": -1,
+    "iteration-limit": 50,
+    "USD-limit": -1,
+    "rpm": 1500,
+    "tpm": 1000000,
+    "rpd": -1,
+}

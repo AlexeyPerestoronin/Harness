@@ -43,9 +43,9 @@ pub const MODE_AUTO_ACCEPT: &str = "auto-accept";
 // Model file
 // ---------------------------------------------------------------------------
 
-/// Vendor identifier (`SpaceXAI` / `GoogleAI`).
+/// Vendor identifier (`SpaceXAI` / `GoogleAI` / `Claude` / `DeepSeek` / `AliBaba`).
 pub const VENDOR: &str = "vendor";
-/// Human-readable model name (`Grok 4.6`, `Gemini 3.8 Flash`, ...).
+/// Human-readable model name (`Grok 4.6`, `DeepSeek-V3`, `Qwen-Max`, ...).
 pub const NAME: &str = "name";
 /// API key string or path to a file with the key. Required.
 pub const API_KEY: &str = "api-key";
