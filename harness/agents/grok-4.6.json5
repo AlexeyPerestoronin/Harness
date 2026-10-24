@@ -1,8 +1,0 @@
-{
-    "vendor": "SpaceXAI",
-    "name": "Grok 4.6",
-    "api-key": "API_KEY_XAI",
-    "token-limit": 128000,
-    "iteration-limit": 50,
-    "USD-limit": 0.5,
-}
