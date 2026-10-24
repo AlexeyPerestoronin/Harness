@@ -229,12 +229,6 @@ impl VendorRequest {
         }
     }
 
-    /// Block until RPM / TPM / RPD allow another request.
-    pub fn wait_rate_limit(&mut self) {
-        let clock = self.clock.clone();
-        self.limiter.wait(&*clock);
-    }
-
     /// Remember `input + output` tokens of a successful response for TPM.
     pub fn record_tokens(&mut self, tokens: i64) {
         let clock = self.clock.clone();
@@ -255,12 +249,8 @@ impl VendorRequest {
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect();
         let body = body.clone();
-        self.execute(move || {
-            let mut builder = client.post(&url).json(&body);
-            for (k, v) in &headers {
-                builder = builder.header(k, v);
-            }
-            match builder.send() {
+        self.execute(
+            move || match json_post(&client, &url, &headers, &body).send() {
                 Err(e) => Err(e.to_string()),
                 Ok(resp) => {
                     let status = resp.status().as_u16();
@@ -268,8 +258,8 @@ impl VendorRequest {
                         .map(|text| (status, text))
                         .map_err(|e| e.to_string())
                 }
-            }
-        })
+            },
+        )
     }
 
     fn execute<F>(&mut self, mut send_once: F) -> Result<String, String>
@@ -308,5 +298,138 @@ impl VendorRequest {
             }
         }
         Err(last_err)
+    }
+}
+
+/// Headers first, then `.json()`.
+///
+/// `RequestBuilder::header` *appends*. Calling `.json()` first sets
+/// `Content-Type: application/json`, and a later `Content-Type` header
+/// becomes a duplicate (`application/json, application/json`). xAI then
+/// answers HTTP 415. `.json()` itself skips `Content-Type` when it is
+/// already present, so the original agent order (headers → json) is safe.
+fn json_post(
+    client: &Client,
+    url: &str,
+    headers: &[(String, String)],
+    body: &Value,
+) -> reqwest::blocking::RequestBuilder {
+    let mut builder = client.post(url);
+    for (k, v) in headers {
+        builder = builder.header(k, v);
+    }
+    builder.json(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn content_types(headers: &[(&str, &str)]) -> Vec<String> {
+        let headers: Vec<(String, String)> = headers
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        let req = json_post(
+            &Client::new(),
+            "https://api.x.ai/v1/chat/completions",
+            &headers,
+            &json!({"model": "grok-4.6"}),
+        )
+        .build()
+        .expect("build json post");
+        req.headers()
+            .get_all(reqwest::header::CONTENT_TYPE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn json_post_sets_single_content_type_when_header_missing() {
+        let types = content_types(&[("Authorization", "Bearer test")]);
+        assert_eq!(types, ["application/json"]);
+    }
+
+    #[test]
+    fn json_post_does_not_duplicate_content_type_from_headers() {
+        let types = content_types(&[
+            ("Authorization", "Bearer test"),
+            ("x-grok-conv-id", "conv"),
+            ("Content-Type", "application/json"),
+        ]);
+        assert_eq!(types, ["application/json"]);
+    }
+
+    fn prompt_xai_api_key() -> String {
+        eprint!("Enter xAI API key: ");
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+        let mut key = String::new();
+        std::io::stdin()
+            .read_line(&mut key)
+            .expect("read xAI API key from stdin");
+        key.trim().to_string()
+    }
+
+    fn grok_headers<'a>(auth: &'a str, conv_id: &'a str) -> [(&'a str, &'a str); 3] {
+        [
+            ("Authorization", auth),
+            ("x-grok-conv-id", conv_id),
+            ("Content-Type", "application/json"),
+        ]
+    }
+
+    /// Live Grok 4.6 calls. Run:
+    /// `cargo test -p harness grok_46_json_content_type_live -- --ignored --nocapture`
+    #[test]
+    #[ignore = "live xAI network; paste the API key when prompted"]
+    fn grok_46_json_content_type_live() {
+        let api_key = prompt_xai_api_key();
+        assert!(!api_key.is_empty(), "xAI API key must not be empty");
+
+        let logger: Arc<dyn Logger> = Arc::new(logger::NullLogger);
+        let mut http = VendorRequest::new(-1, -1, -1, logger);
+        let auth = format!("Bearer {api_key}");
+        let conv_id = uuid::Uuid::new_v4().to_string();
+        let headers = grok_headers(&auth, &conv_id);
+
+        let ok = http
+            .send_json(
+                "https://api.x.ai/v1/chat/completions",
+                &headers,
+                &json!({
+                    "model": "grok-4.6",
+                    "messages": [{
+                        "role": "user",
+                        "content": "Reply with the single word pong."
+                    }],
+                }),
+            )
+            .expect("grok-4.6 JSON POST should succeed");
+        let parsed: Value = serde_json::from_str(&ok).expect("grok JSON body");
+        assert!(
+            parsed.get("choices").and_then(|c| c.as_array()).is_some(),
+            "expected choices in grok-4.6 response: {ok}"
+        );
+
+        let err = http
+            .send_json(
+                "https://api.x.ai/v1/chat/completions",
+                &headers,
+                &json!({
+                    "model": "this-model-does-not-exist",
+                    "messages": [{"role": "user", "content": "ping"}],
+                }),
+            )
+            .expect_err("unknown model must fail");
+        assert!(
+            !err.contains("HTTP 415"),
+            "unknown model failed with 415 (Content-Type not accepted): {err}"
+        );
+        assert!(
+            err.starts_with("HTTP "),
+            "expected an HTTP error, got: {err}"
+        );
     }
 }
