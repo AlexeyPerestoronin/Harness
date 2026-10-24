@@ -1,7 +1,8 @@
 {
     "vendor": "GoogleAI",
     "name": "Gemini 3.8 Flash",
-    "api-key": "api-key or path to file with api-key",
+    // api-key or path to file with api-key
+    "api-key": "API_KEY_GEMINI",
     "token-limit": -1,
     "iteration-limit": 50,
     "USD-limit": -1,
