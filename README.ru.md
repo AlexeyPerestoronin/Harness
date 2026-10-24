@@ -60,7 +60,7 @@ harness.exe --conf-new "<path to new conf file>"
 - `SpaceXAI` / `Grok 4.6`
 - `GoogleAI` / `Gemini 3.8 Flash`, `Gemini 3.5 Flash Lite`, `Gemini 3.1 Flash Lite`
 - `Claude` / `Claude Sonnet 5.5`
-- `DeepSeek` / `DeepSeek-V3`, `DeepSeek-R1`
+- `DeepSeek` / `DeepSeek-V3`, `DeepSeek-R1`, `DeepSeek-Flash`, `DeepSeek-V4-Pro`
 - `AliBaba` / `Qwen-Turbo`, `Qwen-Plus`, `Qwen-Max`
 
 ## Инструменты

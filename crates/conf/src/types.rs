@@ -78,6 +78,12 @@ impl AgentKind {
             ("DeepSeek", "DeepSeek-R1") => Ok(AgentKind::DeepSeek {
                 api_model: "deepseek-reasoner".into(),
             }),
+            ("DeepSeek", "DeepSeek-Flash") => Ok(AgentKind::DeepSeek {
+                api_model: "deepseek-flash".into(),
+            }),
+            ("DeepSeek", "DeepSeek-V4-Pro") => Ok(AgentKind::DeepSeek {
+                api_model: "deepseek-v4-pro".into(),
+            }),
             ("AliBaba", "Qwen-Turbo") => Ok(AgentKind::Alibaba {
                 api_model: "qwen-turbo".into(),
             }),
@@ -265,6 +271,8 @@ mod tests {
             ("Claude", "Claude Sonnet 5.5", "claude-sonnet-5-5"),
             ("DeepSeek", "DeepSeek-V3", "deepseek-chat"),
             ("DeepSeek", "DeepSeek-R1", "deepseek-reasoner"),
+            ("DeepSeek", "DeepSeek-Flash", "deepseek-flash"),
+            ("DeepSeek", "DeepSeek-V4-Pro", "deepseek-v4-pro"),
             ("AliBaba", "Qwen-Turbo", "qwen-turbo"),
             ("AliBaba", "Qwen-Plus", "qwen-plus"),
             ("AliBaba", "Qwen-Max", "qwen-max"),

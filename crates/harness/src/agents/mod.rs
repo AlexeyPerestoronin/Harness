@@ -63,6 +63,11 @@ pub struct UsageStats {
 }
 
 /// Convert registry descriptors into OpenAI-style tool definitions.
+///
+/// OpenAI-compatible vendors (DeepSeek, xAI, Qwen) require
+/// `function.parameters` to be a JSON Schema with `type: "object"`.
+/// No-arg tools may be `{}` in the registry; those get `type: object`
+/// so DeepSeek does not 400 with `got 'type: null'`.
 pub fn openai_tools(list: &[ToolDescriptor]) -> serde_json::Value {
     serde_json::Value::Array(
         list.iter()
@@ -72,7 +77,7 @@ pub fn openai_tools(list: &[ToolDescriptor]) -> serde_json::Value {
                     "function": {
                         "name": t.name,
                         "description": t.description,
-                        "parameters": t.parameters,
+                        "parameters": object_json_schema(&t.parameters),
                     }
                 })
             })
@@ -106,15 +111,18 @@ pub fn claude_tools(list: &[ToolDescriptor]) -> serde_json::Value {
                 serde_json::json!({
                     "name": t.name,
                     "description": t.description,
-                    "input_schema": claude_input_schema(&t.parameters),
+                    "input_schema": object_json_schema(&t.parameters),
                 })
             })
             .collect(),
     )
 }
 
-/// Ensure a JSON Schema object has `type` (required by Claude `input_schema`).
-fn claude_input_schema(parameters: &serde_json::Value) -> serde_json::Value {
+/// Ensure a JSON Schema object has `type: "object"`.
+///
+/// DeepSeek and Claude reject no-arg tools whose schema is `{}` (they
+/// report `type: null`). A non-object value becomes `{ "type": "object" }`.
+fn object_json_schema(parameters: &serde_json::Value) -> serde_json::Value {
     let mut schema = parameters.clone();
     match schema.as_object_mut() {
         Some(obj) => {
@@ -141,5 +149,44 @@ pub fn invoke_tool(
             logger.log_line(&format!("❌ fail → {msg}"));
             msg
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tools::ToolDescriptor;
+
+    fn desc(name: &str, parameters: serde_json::Value) -> ToolDescriptor {
+        ToolDescriptor {
+            name: name.to_string(),
+            description: "d".into(),
+            parameters,
+        }
+    }
+
+    #[test]
+    fn openai_tools_empty_schema_gets_object_type() {
+        let tools = openai_tools(&[desc("list_available_file_extension", json!({}))]);
+        let params = &tools[0]["function"]["parameters"];
+        assert_eq!(params["type"], "object");
+    }
+
+    #[test]
+    fn openai_tools_null_schema_becomes_object() {
+        let tools = openai_tools(&[desc("list_available_r_dir", serde_json::Value::Null)]);
+        assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn openai_tools_keeps_existing_object_schema() {
+        let schema = json!({
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"]
+        });
+        let tools = openai_tools(&[desc("read_file", schema.clone())]);
+        assert_eq!(tools[0]["function"]["parameters"], schema);
     }
 }

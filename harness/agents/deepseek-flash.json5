@@ -1,0 +1,12 @@
+{
+    "vendor": "DeepSeek",
+    "name": "DeepSeek-Flash",
+    // api-key or path to file with api-key
+    "api-key": "API_KEY_DEEP_SEEK",
+    "token-limit": -1,
+    "iteration-limit": 50,
+    "USD-limit": -1,
+    "rpm": -1,
+    "tpm": -1,
+    "rpd": -1,
+}

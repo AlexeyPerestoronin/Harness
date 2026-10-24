@@ -1,7 +1,8 @@
 //! DeepSeek agent over OpenAI-compatible `chat/completions`.
 //!
-//! Models: `deepseek-chat` (V3) and `deepseek-reasoner` (R1). Prefix cache is
-//! automatic; `prompt_cache_hit_tokens` maps to `UsageStats.cached_tokens`.
+//! Models: `deepseek-chat` (V3), `deepseek-reasoner` (R1), `deepseek-flash`
+//! and `deepseek-v4-pro`. Prefix cache is automatic;
+//! `prompt_cache_hit_tokens` maps to `UsageStats.cached_tokens`.
 //! HTTP goes through [`crate::vendor_request::VendorRequest`].
 
 use std::path::Path;
@@ -82,6 +83,7 @@ impl Agent for DeepSeekAgent {
 
 /// Official DeepSeek USD / 1M that matches the task input/output table:
 /// cache hit is the published price (`$0.014` / `$0.14`), not a guessed 90% off.
+/// `deepseek-flash` / `deepseek-v4-pro` have no separate table — V3 rates.
 fn prices_for(api_model: &str) -> TokenPrices {
     if api_model == "deepseek-reasoner" {
         TokenPrices {
@@ -110,6 +112,17 @@ mod tests {
         assert_eq!(p.input, 0.14);
         assert_eq!(p.output, 0.28);
         assert_eq!(p.cache_hit, 0.014);
+    }
+
+    #[test]
+    fn flash_and_v4_pro_use_v3_prices() {
+        let v3 = prices_for("deepseek-chat");
+        for model in ["deepseek-flash", "deepseek-v4-pro"] {
+            let p = prices_for(model);
+            assert_eq!(p.input, v3.input, "{model}");
+            assert_eq!(p.output, v3.output, "{model}");
+            assert_eq!(p.cache_hit, v3.cache_hit, "{model}");
+        }
     }
 
     #[test]
