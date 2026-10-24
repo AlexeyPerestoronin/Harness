@@ -53,14 +53,13 @@ harness.exe --conf-new "<path to new conf file>"
 
 - `vendor`, `name`
 - `api-key` — сам ключ или путь к файлу с ключом
+- `rpm`, `tpm`, `rpd` — обязательные целые числа для любой модели. `-1` — лимит не учитывается; положительное число — лимит включён.
 
 Известные агенты:
 
 - `SpaceXAI` / `Grok 4.6`
 - `GoogleAI` / `Gemini 3.8 Flash`, `Gemini 3.5 Flash Lite`, `Gemini 3.1 Flash Lite`
 - `Claude` / `Claude Sonnet 5.5`
-
-Для Google обязателен `rpm`.
 
 ## Инструменты
 

@@ -8,6 +8,7 @@ mod agent_select;
 mod agents;
 mod cli;
 mod dump_settings;
+mod vendor_request;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

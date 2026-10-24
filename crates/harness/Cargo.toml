@@ -20,5 +20,5 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 uuid = { version = "1", features = ["v4"] }
 # Session folder timestamps and execution-time formatting.
 chrono = "0.4"
-# Random 5..=20 s delay on Google HTTP 503.
+# Random 5..=20 s delay on HTTP 503 in the shared vendor request layer.
 rand = "0.8"

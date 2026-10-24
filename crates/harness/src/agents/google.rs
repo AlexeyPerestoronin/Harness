@@ -1,21 +1,19 @@
 //! Google Gemini agent over `generateContent` REST.
 //!
 //! Automatic function calling is off: the loop executes tools and sends
-//! `functionResponse` parts back. HTTP 429 retries immediately (after the
-//! rate limiter); HTTP 503 sleeps a random 5..=20 seconds. Up to 24 attempts.
+//! `functionResponse` parts back. Rate limits and retries go through
+//! [`crate::vendor_request::VendorRequest`].
 
 use std::path::Path;
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
 
 use logger::Logger;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tools::ToolRegistry;
 
 use super::{gemini_tools, invoke_tool, Agent, UsageStats};
+use crate::vendor_request::VendorRequest;
 use conf::{AgentKind, AgentSettings};
 
 /// Gemini agent (vendor `GoogleAI`).
@@ -28,16 +26,14 @@ pub struct GoogleAgent {
     api_model: String,
     token_limit: i64,
     usd_limit: f64,
-    rpm: u32,
-    last_call: Option<Instant>,
+    http: VendorRequest,
     usage: UsageStats,
     history: Vec<Value>,
     pending: Option<Value>,
-    client: reqwest::blocking::Client,
 }
 
 impl GoogleAgent {
-    /// Build an agent with a resolved API key and rpm from the model file.
+    /// Build an agent with a resolved API key.
     pub fn new(
         tools: Arc<ToolRegistry>,
         logger: Arc<dyn Logger>,
@@ -47,47 +43,20 @@ impl GoogleAgent {
             AgentKind::Google { api_model } => api_model.clone(),
             _ => return Err("expected Google agent settings".into()),
         };
-        let rpm = agent.rpm.ok_or_else(|| {
-            format!(
-                "model '{}' requires '{}' in the model conf file",
-                agent.name,
-                conf::str::keys::RPM
-            )
-        })?;
         Ok(Self {
             tools,
-            logger,
+            logger: logger.clone(),
             api_key: agent.api_key.clone(),
             vendor: agent.vendor.clone(),
             display_name: agent.name.clone(),
             api_model,
             token_limit: agent.token_limit,
             usd_limit: agent.usd_limit,
-            rpm,
-            last_call: None,
+            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
             usage: UsageStats::default(),
             history: Vec::new(),
             pending: None,
-            client: reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(300))
-                .build()
-                .expect("reqwest client"),
         })
-    }
-
-    fn wait_rate_limit(&mut self) {
-        if self.rpm == 0 {
-            return;
-        }
-        let min_interval = 60.0 / f64::from(self.rpm);
-        if let Some(last) = self.last_call {
-            let elapsed = last.elapsed().as_secs_f64();
-            if elapsed < min_interval {
-                let extra = min_interval - elapsed + 1.0;
-                thread::sleep(Duration::from_secs_f64(extra.max(0.0)));
-            }
-        }
-        self.last_call = Some(Instant::now());
     }
 
     fn url(&self) -> String {
@@ -104,49 +73,28 @@ impl GoogleAgent {
             "contents": contents,
             "tools": gemini_tools(&self.tools.list()),
         });
-        let mut last_err = "Request failed after max retries".to_string();
-        for _attempt in 1..=24 {
-            self.wait_rate_limit();
-            let response = self
-                .client
-                .post(self.url())
-                .header("x-goog-api-key", &self.api_key)
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .map_err(|e| format!("Google request failed: {e}"))?;
-            let status = response.status();
-            let text = response
-                .text()
-                .map_err(|e| format!("Google read body failed: {e}"))?;
-            if status.as_u16() == 429 {
-                self.logger.log_str(" fail 429: model limit exceeded!");
-                last_err = "fail 429: model limit exceeded!".into();
-                continue;
-            }
-            if status.as_u16() == 503 {
-                let delay = rand::thread_rng().gen_range(5..=20);
-                self.logger
-                    .log_str(&format!(" fail 503: waiting {delay}s..."));
-                thread::sleep(Duration::from_secs(delay));
-                last_err = "fail 503".into();
-                continue;
-            }
-            if !status.is_success() {
-                return Err(format!("Google HTTP {status}: {text}"));
-            }
-            let parsed = parse_google_response(&text)?;
-            self.usage.requests += 1;
-            self.usage.input_tokens += parsed.prompt_tokens;
-            self.usage.output_tokens += parsed.candidates_tokens;
-            self.usage.cached_tokens += parsed.cached_tokens;
-            self.history.push(message.clone());
-            if let Some(model_content) = &parsed.model_content {
-                self.history.push(model_content.clone());
-            }
-            return Ok(parsed);
+        let url = self.url();
+        let api_key = self.api_key.clone();
+        let text = self.http.send_json(
+            &url,
+            &[
+                ("x-goog-api-key", api_key.as_str()),
+                ("Content-Type", "application/json"),
+            ],
+            &body,
+        )?;
+        let parsed = parse_google_response(&text)?;
+        self.http
+            .record_tokens(parsed.prompt_tokens + parsed.candidates_tokens);
+        self.usage.requests += 1;
+        self.usage.input_tokens += parsed.prompt_tokens;
+        self.usage.output_tokens += parsed.candidates_tokens;
+        self.usage.cached_tokens += parsed.cached_tokens;
+        self.history.push(message.clone());
+        if let Some(model_content) = &parsed.model_content {
+            self.history.push(model_content.clone());
         }
-        Err(last_err)
+        Ok(parsed)
     }
 
     fn handle_tool_calls(&self, calls: &[GoogleFnCall]) -> Value {

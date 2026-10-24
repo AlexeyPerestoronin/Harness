@@ -53,14 +53,13 @@ Rules:
 
 - `vendor`, `name`
 - `api-key` — the key itself, or a path to a file that contains the key
+- `rpm`, `tpm`, `rpd` — required integers for every model. `-1` disables that limit; a positive integer enables it.
 
 Known agents:
 
 - `SpaceXAI` / `Grok 4.6`
 - `GoogleAI` / `Gemini 3.8 Flash`, `Gemini 3.5 Flash Lite`, `Gemini 3.1 Flash Lite`
 - `Claude` / `Claude Sonnet 5.5`
-
-Google models require `rpm`.
 
 ## Tools
 

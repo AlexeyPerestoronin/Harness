@@ -244,16 +244,9 @@ fn settings_from_model(
     let api_key = resolve_api_key(model_obj)?;
     let kind = AgentKind::from_vendor_name(&vendor, &name)?;
 
-    let rpm = optional_u32(model_obj, keys::RPM)?;
-    let tpm = optional_u32(model_obj, keys::TPM)?;
-    let rpd = optional_u32(model_obj, keys::RPD)?;
-
-    if matches!(kind, AgentKind::Google { .. }) && rpm.is_none() {
-        return Err(ConfError::new(format!(
-            "model '{name}' requires '{rpm}' in the model conf file",
-            rpm = keys::RPM
-        )));
-    }
+    let rpm = required_model_int(model_obj, keys::RPM)?;
+    let tpm = required_model_int(model_obj, keys::TPM)?;
+    let rpd = required_model_int(model_obj, keys::RPD)?;
 
     let (token_limit, iteration_limit, usd_limit) = match limits {
         Some(v) => v,
@@ -548,15 +541,6 @@ fn required_u64(obj: &serde_json::Map<String, Value>, key: &str) -> Result<u64, 
     }
 }
 
-fn optional_u32(obj: &serde_json::Map<String, Value>, key: &str) -> Result<Option<u32>, ConfError> {
-    match obj.get(key) {
-        None => Ok(None),
-        Some(v) => as_u64(v)
-            .map(|n| Some(n as u32))
-            .ok_or_else(|| ConfError::new(format!("'{key}' must be a number"))),
-    }
-}
-
 fn optional_string_list(
     obj: &serde_json::Map<String, Value>,
     key: &str,
@@ -630,4 +614,27 @@ fn required_deprecated_list(
         }
     }
     Ok(items)
+}
+
+fn required_model_int(obj: &serde_json::Map<String, Value>, key: &str) -> Result<i64, ConfError> {
+    match obj.get(key) {
+        None => Err(ConfError::new(format!(
+            "please define '{key}' in the model conf file"
+        ))),
+        Some(v) => match strict_i64(v) {
+            Some(n) if n == -1 || n >= 1 => Ok(n),
+            _ => Err(ConfError::new(format!(
+                "'{key}' must be -1 or a positive integer"
+            ))),
+        },
+    }
+}
+
+fn strict_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(n) => n
+            .as_i64()
+            .or_else(|| n.as_u64().and_then(|u| i64::try_from(u).ok())),
+        _ => None,
+    }
 }

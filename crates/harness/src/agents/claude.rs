@@ -3,6 +3,7 @@
 //! Conversation state is a local message list. Tools use Anthropic
 //! `input_schema` (not OpenAI `function` / Gemini `functionDeclarations`).
 //! USD is not reported by the API and stays `0.0`.
+//! Rate limits and retries go through [`crate::vendor_request::VendorRequest`].
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use serde_json::{json, Value};
 use tools::ToolRegistry;
 
 use super::{claude_tools, invoke_tool, Agent, UsageStats};
+use crate::vendor_request::VendorRequest;
 use conf::{AgentKind, AgentSettings};
 
 const CLAUDE_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -33,7 +35,7 @@ pub struct ClaudeAgent {
     usd_limit: f64,
     usage: UsageStats,
     messages: Vec<Value>,
-    client: reqwest::blocking::Client,
+    http: VendorRequest,
 }
 
 impl ClaudeAgent {
@@ -49,7 +51,7 @@ impl ClaudeAgent {
         };
         Ok(Self {
             tools,
-            logger,
+            logger: logger.clone(),
             api_key: agent.api_key.clone(),
             vendor: agent.vendor.clone(),
             display_name: agent.name.clone(),
@@ -58,10 +60,7 @@ impl ClaudeAgent {
             usd_limit: agent.usd_limit,
             usage: UsageStats::default(),
             messages: Vec::new(),
-            client: reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(300))
-                .build()
-                .expect("reqwest client"),
+            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
         })
     }
 
@@ -77,23 +76,19 @@ impl ClaudeAgent {
             "messages": self.messages,
             "tools": tools,
         });
-        let response = self
-            .client
-            .post(CLAUDE_URL)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .map_err(|e| format!("Claude request failed: {e}"))?;
-        let status = response.status();
-        let text = response
-            .text()
-            .map_err(|e| format!("Claude read body failed: {e}"))?;
-        if !status.is_success() {
-            return Err(format!("Claude HTTP {status}: {text}"));
-        }
+        let api_key = self.api_key.clone();
+        let text = self.http.send_json(
+            CLAUDE_URL,
+            &[
+                ("x-api-key", api_key.as_str()),
+                ("anthropic-version", ANTHROPIC_VERSION),
+                ("Content-Type", "application/json"),
+            ],
+            &body,
+        )?;
         let parsed = parse_claude_response(&text)?;
+        self.http
+            .record_tokens(parsed.input_tokens + parsed.output_tokens);
         self.usage.requests += 1;
         self.usage.input_tokens += parsed.input_tokens;
         self.usage.output_tokens += parsed.output_tokens;

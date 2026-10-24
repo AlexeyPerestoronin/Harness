@@ -6,4 +6,7 @@
     "token-limit": 500000,
     "iteration-limit": -1,
     "USD-limit": -1,
+    "rpm": -1,
+    "tpm": -1,
+    "rpd": -1,
 }

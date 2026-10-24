@@ -118,12 +118,12 @@ pub struct AgentSettings {
     pub iteration_limit: i64,
     /// Session USD limit (`-1` = unlimited).
     pub usd_limit: f64,
-    /// Requests per minute. Required for Google.
-    pub rpm: Option<u32>,
-    /// Tokens per minute (informational).
-    pub tpm: Option<u32>,
-    /// Requests per day (informational).
-    pub rpd: Option<u32>,
+    /// Requests per minute (`-1` = not enforced).
+    pub rpm: i64,
+    /// Tokens per minute (`-1` = not enforced).
+    pub tpm: i64,
+    /// Requests per day (`-1` = not enforced).
+    pub rpd: i64,
     /// Absolute path of the agent json5 file that was loaded.
     pub config_path: PathBuf,
 }

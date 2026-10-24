@@ -49,11 +49,11 @@ pub const VENDOR: &str = "vendor";
 pub const NAME: &str = "name";
 /// API key string or path to a file with the key. Required.
 pub const API_KEY: &str = "api-key";
-/// Requests per minute (Google). Required for Google models.
+/// Requests per minute. `-1` = not enforced. Required for every model.
 pub const RPM: &str = "rpm";
-/// Tokens per minute (Google, recommended).
+/// Tokens per minute. `-1` = not enforced. Required for every model.
 pub const TPM: &str = "tpm";
-/// Requests per day (Google, recommended).
+/// Requests per day. `-1` = not enforced. Required for every model.
 pub const RPD: &str = "rpd";
 
 // ---------------------------------------------------------------------------
