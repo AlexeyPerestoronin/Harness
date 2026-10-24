@@ -229,6 +229,12 @@ Configuration (`tools.roles`): object whose keys are role names
 (`A-Z a-z 0-9 _ - .`). Missing key disables the module. Empty object
 `{}` enables the tool with no roles.
 
+      "roles": {
+        "senior-developer": {
+            "description": "Used when working with project code base",
+            "file": "harness/roles/senior-developer.md"
+        },
+
 Each entry: `description` and `file`, same rules as skills. Missing file
 at startup: `error → role-file '<absolute path>' doesn't find`.
 
