@@ -8,6 +8,7 @@
 ```md
 ## Iteration №5
 Usage:
+- time = 12 min 45 sec
 - tokens = 100000
 - USD approximated = 10.34
 - USD real = 10.45
@@ -16,10 +17,11 @@ Usage:
 Если ни один ответ сессии не содержал стоимость:
 
 ```md
-- USD real = doesn't obtained from response
+- USD real = wasn't obtained from response
 ```
 
-Строка `doesn't obtained from response` — буквально такая, с этой грамматикой. Не исправлять на «wasn't».
+`- time = 12 min 45 sec` - строка выводящая общее время работы цикла на текущей итерации.
+Сейчас время выводится только в конце цикла, надо добавить логику вывода для каждой итерации.
 
 ## Функциональные требования
 ### 1. Откуда берутся цены
@@ -96,6 +98,7 @@ fn consumed_usd_real(&self) -> Option<f64>;
 ```text
 ## Iteration №{n}
 Usage:
+- time = {loop_consumed_time}
 - tokens = {consumed_tokens}
 - USD approximated = {number}
 - USD real = {number или doesn't obtained from response}
