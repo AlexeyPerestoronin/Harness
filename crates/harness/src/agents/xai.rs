@@ -2,6 +2,8 @@
 //!
 //! Conversation state is a local message list. The `x-grok-conv-id` header is
 //! sent on every request. Token accounting: `input + output - cached`.
+//! USD approximation uses model prices from settings; real cost is parsed
+//! from response bodies when present.
 //! Rate limits and retries go through [`crate::vendor_request::VendorRequest`].
 
 use std::path::Path;
@@ -13,7 +15,10 @@ use serde_json::{json, Value};
 use tools::ToolRegistry;
 use uuid::Uuid;
 
-use super::{invoke_tool, openai_tools, Agent, UsageStats};
+use super::{
+    accumulate_real_cost, approximate_usd, format_real_cost, invoke_tool, openai_tools,
+    real_cost_from_body, Agent, RealCost, UsageStats,
+};
 use crate::vendor_request::VendorRequest;
 use conf::{AgentKind, AgentSettings};
 
@@ -29,6 +34,9 @@ pub struct XaiAgent {
     api_model: String,
     token_limit: i64,
     usd_limit: f64,
+    input_price: f64,
+    output_price: f64,
+    cached_price: f64,
     conv_id: String,
     chat_id: String,
     usage: UsageStats,
@@ -56,6 +64,9 @@ impl XaiAgent {
             api_model,
             token_limit: agent.token_limit,
             usd_limit: agent.usd_limit,
+            input_price: agent.input_price,
+            output_price: agent.output_price,
+            cached_price: agent.cached_price,
             conv_id: Uuid::new_v4().to_string(),
             chat_id: Uuid::new_v4().to_string(),
             usage: UsageStats::default(),
@@ -90,7 +101,15 @@ impl XaiAgent {
         self.usage.input_tokens += parsed.prompt_tokens;
         self.usage.output_tokens += parsed.completion_tokens;
         self.usage.cached_tokens += parsed.cached_tokens;
-        self.usage.total_cost_usd += parsed.cost_usd;
+        self.usage.total_cost_usd += approximate_usd(
+            parsed.prompt_tokens,
+            parsed.cached_tokens,
+            parsed.completion_tokens,
+            self.input_price,
+            self.output_price,
+            self.cached_price,
+        );
+        self.usage.real_cost_usd = accumulate_real_cost(self.usage.real_cost_usd, parsed.real_cost);
         Ok(parsed)
     }
 
@@ -141,6 +160,9 @@ impl Agent for XaiAgent {
     }
     fn consumed_usd(&self) -> f64 {
         self.usage.total_cost_usd
+    }
+    fn consumed_usd_real(&self) -> Option<f64> {
+        self.usage.real_cost_usd
     }
 
     fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
@@ -201,8 +223,14 @@ impl Agent for XaiAgent {
             "    ↔ cached tokens: {}",
             self.usage.cached_tokens
         ));
-        self.logger
-            .log_line(&format!("- total cost: {}$", self.usage.total_cost_usd));
+        self.logger.log_line(&format!(
+            "- USD approximated: {}",
+            super::format_usd(self.usage.total_cost_usd)
+        ));
+        self.logger.log_line(&format!(
+            "- USD real: {}",
+            format_real_cost(self.usage.real_cost_usd)
+        ));
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {
@@ -252,7 +280,7 @@ struct ParsedXai {
     prompt_tokens: i64,
     completion_tokens: i64,
     cached_tokens: i64,
-    cost_usd: f64,
+    real_cost: Option<RealCost>,
 }
 
 /// Parse an OpenAI-compatible chat completion body (unit-tested on fixtures).
@@ -320,7 +348,7 @@ fn parse_xai_response(text: &str) -> Result<ParsedXai, String> {
                 .and_then(|x| x.as_i64())
         })
         .unwrap_or(0);
-    let cost_usd = parse_cost_usd(&v, &usage);
+    let real_cost = real_cost_from_body(&v, &usage);
     Ok(ParsedXai {
         role,
         content,
@@ -330,46 +358,10 @@ fn parse_xai_response(text: &str) -> Result<ParsedXai, String> {
         prompt_tokens,
         completion_tokens,
         cached_tokens,
-        cost_usd,
+        real_cost,
     })
 }
 
 fn json_i64(v: &Value, key: &str) -> i64 {
     v.get(key).and_then(|x| x.as_i64()).unwrap_or(0)
-}
-
-fn json_f64(v: &Value) -> Option<f64> {
-    v.as_f64()
-        .or_else(|| v.as_i64().map(|n| n as f64))
-        .or_else(|| v.as_u64().map(|n| n as f64))
-        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
-}
-
-/// xAI puts USD on `usage` (and sometimes on the root). Values may be numbers or numeric strings.
-fn parse_cost_usd(root: &Value, usage: &Value) -> f64 {
-    // 1. Сначала ищем точные тики (целое число) в новых ответах xAI
-    for src in [usage, root] {
-        if let Some(ticks) = src.get("cost_in_usd_ticks").and_then(|v| v.as_u64()) {
-            const TICKS_PER_USD: f64 = 10_000_000_000.0;
-            return ticks as f64 / TICKS_PER_USD;
-        }
-    }
-
-    // 2. Если тиков нет, откатываемся к старым ключам с плавающей запятой
-    const KEYS: &[&str] = &[
-        "cost_in_usd",
-        "cost_usd",
-        "cost",
-        "total_cost_usd",
-        "total_cost",
-    ];
-    for src in [usage, root] {
-        for key in KEYS {
-            if let Some(v) = src.get(*key).and_then(json_f64) {
-                return v;
-            }
-        }
-    }
-
-    0.0
 }

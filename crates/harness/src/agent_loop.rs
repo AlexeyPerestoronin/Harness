@@ -14,7 +14,10 @@ use conf::{AgentKind, Settings};
 use logger::{DoubleLogger, Logger};
 use tools::{ToolRegistry, ToolsContext};
 
-use crate::agents::{Agent, AlibabaAgent, ClaudeAgent, DeepSeekAgent, GoogleAgent, XaiAgent};
+use crate::agents::{
+    format_real_cost, format_usd, Agent, AlibabaAgent, ClaudeAgent, DeepSeekAgent, GoogleAgent,
+    XaiAgent,
+};
 
 /// Drive one harness session.
 pub struct AgentLoop {
@@ -50,12 +53,16 @@ impl AgentLoop {
             AgentKind::Claude { .. } => {
                 Box::new(ClaudeAgent::new(registry, logger.clone(), &settings.agent)?)
             }
-            AgentKind::DeepSeek { .. } => {
-                Box::new(DeepSeekAgent::new(registry, logger.clone(), &settings.agent)?)
-            }
-            AgentKind::Alibaba { .. } => {
-                Box::new(AlibabaAgent::new(registry, logger.clone(), &settings.agent)?)
-            }
+            AgentKind::DeepSeek { .. } => Box::new(DeepSeekAgent::new(
+                registry,
+                logger.clone(),
+                &settings.agent,
+            )?),
+            AgentKind::Alibaba { .. } => Box::new(AlibabaAgent::new(
+                registry,
+                logger.clone(),
+                &settings.agent,
+            )?),
         };
         Ok(Self {
             safe_mode: settings.agent.mode.is_safe(),
@@ -108,12 +115,14 @@ impl AgentLoop {
         let start_time = Instant::now();
         loop {
             self.iteration += 1;
+            let elapsed = start_time.elapsed().as_secs();
             self.logger.log_line("");
-            self.logger.log_line(&format!(
-                "## Iteration №{}: (tokens = {}; usd = {})",
+            self.logger.log_line(&iteration_header(
                 self.iteration,
+                elapsed,
                 self.agent.consumed_tokens(),
-                self.agent.consumed_usd()
+                self.agent.consumed_usd(),
+                self.agent.consumed_usd_real(),
             ));
 
             if !self.check_limit(
@@ -147,7 +156,7 @@ impl AgentLoop {
         let secs = start_time.elapsed().as_secs();
         let formatted = format!("{}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60);
         self.logger
-            .log_line(&format!("# Execution time: {formatted}"));
+            .log_line(&format!("- Execution time: {formatted}"));
         self.logger.log_line("");
         Ok(())
     }
@@ -162,6 +171,28 @@ impl AgentLoop {
         }
         true
     }
+}
+
+/// Build the iteration header block logged before each model call.
+fn iteration_header(
+    iteration: i64,
+    elapsed_secs: u64,
+    tokens: i64,
+    usd: f64,
+    real_usd: Option<f64>,
+) -> String {
+    format!(
+        "## Iteration №{}\nUsage:\n- time = {}\n- tokens = {}\n- USD approximated = {}\n- USD real = {}",
+        iteration,
+        format_elapsed(elapsed_secs),
+        tokens,
+        format_usd(usd),
+        format_real_cost(real_usd)
+    )
+}
+
+fn format_elapsed(secs: u64) -> String {
+    format!("{} min {} sec", secs / 60, secs % 60)
 }
 
 fn confirm(prompt: &str) -> bool {
@@ -184,4 +215,30 @@ pub fn session_dir(settings: &Settings) -> Result<PathBuf, String> {
     let dir = settings.cwd.join(&settings.log_folder).join(folder);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create log dir: {e}"))?;
     Ok(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iteration_header_has_usage_block_and_no_old_format() {
+        let header = iteration_header(5, 765, 100000, 10.34, Some(10.45));
+        assert!(header.contains("## Iteration №5"));
+        assert!(header.contains("Usage:"));
+        assert!(header.contains("- time = 12 min 45 sec"));
+        assert!(header.contains("- tokens = 100000"));
+        assert!(header.contains("- USD approximated = 10.34"));
+        assert!(header.contains("- USD real = 10.45"));
+        assert!(!header.contains("(tokens ="));
+        assert!(!header.contains("usd ="));
+    }
+
+    #[test]
+    fn iteration_header_uses_unknown_text_for_missing_real_cost() {
+        let header = iteration_header(1, 0, 0, 0.0, None);
+        assert!(header.contains("## Iteration №1"));
+        assert!(header.contains("- USD approximated = 0.00"));
+        assert!(header.contains("- USD real = doesn't obtained from response"));
+    }
 }

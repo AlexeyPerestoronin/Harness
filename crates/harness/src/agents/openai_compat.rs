@@ -2,8 +2,8 @@
 //!
 //! xAI keeps its own parser and headers (`x-grok-conv-id`, `cost_in_usd_ticks`).
 //! This module owns the protocol both new vendors actually share: messages,
-//! tools, cache-token mapping and USD arithmetic. Vendor files only supply
-//! URL, `AgentKind` and per-model prices.
+//! tools, cache-token mapping and USD accounting. Vendor files only supply
+//! URL, `AgentKind` and the API model.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,18 +13,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tools::ToolRegistry;
 
-use super::{invoke_tool, openai_tools, Agent, UsageStats};
+use super::{
+    accumulate_real_cost, approximate_usd, format_real_cost, invoke_tool, openai_tools,
+    real_cost_from_body, Agent, RealCost, UsageStats,
+};
 use crate::vendor_request::VendorRequest;
 use conf::AgentSettings;
-
-/// USD prices per 1M tokens. `cache_hit` is `0.0` when the vendor has no
-/// published cache-hit price — do not invent a discount coefficient.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TokenPrices {
-    pub input: f64,
-    pub cache_hit: f64,
-    pub output: f64,
-}
 
 /// Session dump shared by DeepSeek and AliBaba (no vendor conversation id).
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,6 +46,7 @@ pub(crate) struct ParsedChat {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
     pub cached_tokens: i64,
+    pub real_cost: Option<RealCost>,
 }
 
 /// OpenAI-compatible chat agent used by DeepSeek and AliBaba wrappers.
@@ -66,14 +61,17 @@ pub(crate) struct OpenAiCompatAgent {
     url: &'static str,
     token_limit: i64,
     usd_limit: f64,
-    prices: TokenPrices,
+    input_price: f64,
+    output_price: f64,
+    cached_price: f64,
     usage: UsageStats,
     messages: Vec<Value>,
     http: VendorRequest,
 }
 
 impl OpenAiCompatAgent {
-    /// Build from already-resolved settings plus vendor URL / prices.
+    /// Build from already-resolved settings plus the vendor URL. Prices come
+    /// from `AgentSettings`, not from a vendor-specific hardcoded table.
     pub(crate) fn create(
         tools: Arc<ToolRegistry>,
         logger: Arc<dyn Logger>,
@@ -81,7 +79,6 @@ impl OpenAiCompatAgent {
         api_model: String,
         url: &'static str,
         vendor_label: &'static str,
-        prices: TokenPrices,
     ) -> Self {
         Self {
             tools,
@@ -94,7 +91,9 @@ impl OpenAiCompatAgent {
             url,
             token_limit: agent.token_limit,
             usd_limit: agent.usd_limit,
-            prices,
+            input_price: agent.input_price,
+            output_price: agent.output_price,
+            cached_price: agent.cached_price,
             usage: UsageStats::default(),
             messages: Vec::new(),
             http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
@@ -124,12 +123,15 @@ impl OpenAiCompatAgent {
         self.usage.input_tokens += parsed.prompt_tokens;
         self.usage.output_tokens += parsed.completion_tokens;
         self.usage.cached_tokens += parsed.cached_tokens;
-        self.usage.total_cost_usd += usd_cost(
+        self.usage.total_cost_usd += approximate_usd(
             parsed.prompt_tokens,
             parsed.cached_tokens,
             parsed.completion_tokens,
-            self.prices,
+            self.input_price,
+            self.output_price,
+            self.cached_price,
         );
+        self.usage.real_cost_usd = accumulate_real_cost(self.usage.real_cost_usd, parsed.real_cost);
         Ok(parsed)
     }
 
@@ -180,6 +182,9 @@ impl Agent for OpenAiCompatAgent {
     }
     fn consumed_usd(&self) -> f64 {
         self.usage.total_cost_usd
+    }
+    fn consumed_usd_real(&self) -> Option<f64> {
+        self.usage.real_cost_usd
     }
 
     fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
@@ -240,8 +245,14 @@ impl Agent for OpenAiCompatAgent {
             "    ↔ cached tokens: {}",
             self.usage.cached_tokens
         ));
-        self.logger
-            .log_line(&format!("- total cost: {}$", self.usage.total_cost_usd));
+        self.logger.log_line(&format!(
+            "- USD approximated: {}",
+            super::format_usd(self.usage.total_cost_usd)
+        ));
+        self.logger.log_line(&format!(
+            "- USD real: {}",
+            format_real_cost(self.usage.real_cost_usd)
+        ));
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {
@@ -315,6 +326,7 @@ pub(crate) fn parse_chat_completion(text: &str, vendor: &str) -> Result<ParsedCh
         }
     }
     let usage = v.get("usage").cloned().unwrap_or(Value::Null);
+    let real_cost = real_cost_from_body(&v, &usage);
     Ok(ParsedChat {
         role,
         content,
@@ -324,6 +336,7 @@ pub(crate) fn parse_chat_completion(text: &str, vendor: &str) -> Result<ParsedCh
         prompt_tokens: json_i64(&usage, "prompt_tokens"),
         completion_tokens: json_i64(&usage, "completion_tokens"),
         cached_tokens: cached_tokens_from_usage(&usage),
+        real_cost,
     })
 }
 
@@ -333,7 +346,10 @@ pub(crate) fn parse_chat_completion(text: &str, vendor: &str) -> Result<ParsedCh
 /// Qwen/DashScope: `prompt_tokens_details.cached_tokens` or
 /// `input_tokens_details.cached_tokens`. Missing fields → `0`, never an error.
 pub(crate) fn cached_tokens_from_usage(usage: &Value) -> i64 {
-    if let Some(n) = usage.get("prompt_cache_hit_tokens").and_then(|x| x.as_i64()) {
+    if let Some(n) = usage
+        .get("prompt_cache_hit_tokens")
+        .and_then(|x| x.as_i64())
+    {
         return n;
     }
     if let Some(n) = usage
@@ -351,23 +367,6 @@ pub(crate) fn cached_tokens_from_usage(usage: &Value) -> i64 {
         return n;
     }
     0
-}
-
-/// `usd = uncached_input/1e6 * input + cached_input/1e6 * cache_hit + output/1e6 * output`.
-///
-/// `uncached_input = max(input_tokens - cached_tokens, 0)`. When `cache_hit` is
-/// `0.0` the cache tokens are free rather than guessed at ~90% off.
-pub(crate) fn usd_cost(
-    input_tokens: i64,
-    cached_tokens: i64,
-    output_tokens: i64,
-    prices: TokenPrices,
-) -> f64 {
-    let cached = cached_tokens.max(0);
-    let uncached = (input_tokens - cached).max(0);
-    (uncached as f64) / 1_000_000.0 * prices.input
-        + (cached as f64) / 1_000_000.0 * prices.cache_hit
-        + (output_tokens.max(0) as f64) / 1_000_000.0 * prices.output
 }
 
 fn json_i64(v: &Value, key: &str) -> i64 {

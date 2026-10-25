@@ -1,7 +1,9 @@
 //! Google Gemini agent over `generateContent` REST.
 //!
 //! Automatic function calling is off: the loop executes tools and sends
-//! `functionResponse` parts back. Rate limits and retries go through
+//! `functionResponse` parts back. USD approximation uses model prices from
+//! settings; real cost is parsed from response bodies when present.
+//! Rate limits and retries go through
 //! [`crate::vendor_request::VendorRequest`].
 
 use std::path::Path;
@@ -12,7 +14,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tools::ToolRegistry;
 
-use super::{gemini_tools, invoke_tool, Agent, UsageStats};
+use super::{
+    accumulate_real_cost, approximate_usd, format_real_cost, gemini_tools, invoke_tool,
+    real_cost_from_body, Agent, RealCost, UsageStats,
+};
 use crate::vendor_request::VendorRequest;
 use conf::{AgentKind, AgentSettings};
 
@@ -26,6 +31,9 @@ pub struct GoogleAgent {
     api_model: String,
     token_limit: i64,
     usd_limit: f64,
+    input_price: f64,
+    output_price: f64,
+    cached_price: f64,
     http: VendorRequest,
     usage: UsageStats,
     history: Vec<Value>,
@@ -52,6 +60,9 @@ impl GoogleAgent {
             api_model,
             token_limit: agent.token_limit,
             usd_limit: agent.usd_limit,
+            input_price: agent.input_price,
+            output_price: agent.output_price,
+            cached_price: agent.cached_price,
             http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
             usage: UsageStats::default(),
             history: Vec::new(),
@@ -90,6 +101,15 @@ impl GoogleAgent {
         self.usage.input_tokens += parsed.prompt_tokens;
         self.usage.output_tokens += parsed.candidates_tokens;
         self.usage.cached_tokens += parsed.cached_tokens;
+        self.usage.total_cost_usd += approximate_usd(
+            parsed.prompt_tokens,
+            parsed.cached_tokens,
+            parsed.candidates_tokens,
+            self.input_price,
+            self.output_price,
+            self.cached_price,
+        );
+        self.usage.real_cost_usd = accumulate_real_cost(self.usage.real_cost_usd, parsed.real_cost);
         self.history.push(message.clone());
         if let Some(model_content) = &parsed.model_content {
             self.history.push(model_content.clone());
@@ -152,6 +172,9 @@ impl Agent for GoogleAgent {
     fn consumed_usd(&self) -> f64 {
         self.usage.total_cost_usd
     }
+    fn consumed_usd_real(&self) -> Option<f64> {
+        self.usage.real_cost_usd
+    }
 
     fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
@@ -199,6 +222,14 @@ impl Agent for GoogleAgent {
         ));
         self.logger
             .log_line(&format!("    - output: {}", self.usage.output_tokens));
+        self.logger.log_line(&format!(
+            "- USD approximated: {}",
+            super::format_usd(self.usage.total_cost_usd)
+        ));
+        self.logger.log_line(&format!(
+            "- USD real: {}",
+            format_real_cost(self.usage.real_cost_usd)
+        ));
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {
@@ -242,6 +273,7 @@ struct ParsedGoogle {
     prompt_tokens: i64,
     candidates_tokens: i64,
     cached_tokens: i64,
+    real_cost: Option<RealCost>,
 }
 
 /// Parse a `generateContent` JSON body (unit-tested on fixtures).
@@ -281,6 +313,7 @@ fn parse_google_response(text: &str) -> Result<ParsedGoogle, String> {
         }
     }
     let usage = v.get("usageMetadata").cloned().unwrap_or(Value::Null);
+    let real_cost = real_cost_from_body(&v, &usage);
     Ok(ParsedGoogle {
         text: text_out,
         function_calls,
@@ -297,5 +330,6 @@ fn parse_google_response(text: &str) -> Result<ParsedGoogle, String> {
             .get("cachedContentTokenCount")
             .and_then(|x| x.as_i64())
             .unwrap_or(0),
+        real_cost,
     })
 }

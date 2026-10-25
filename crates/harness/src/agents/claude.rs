@@ -2,7 +2,9 @@
 //!
 //! Conversation state is a local message list. Tools use Anthropic
 //! `input_schema` (not OpenAI `function` / Gemini `functionDeclarations`).
-//! USD is not reported by the API and stays `0.0`.
+//! USD approximation uses model prices from settings; real cost is parsed
+//! from response bodies when present. Cache-read tokens are recorded
+//! separately and cache-creation tokens stay in the input price.
 //! Rate limits and retries go through [`crate::vendor_request::VendorRequest`].
 
 use std::path::Path;
@@ -13,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tools::ToolRegistry;
 
-use super::{claude_tools, invoke_tool, Agent, UsageStats};
+use super::{
+    accumulate_real_cost, approximate_usd, claude_tools, format_real_cost, invoke_tool,
+    real_cost_from_body, Agent, RealCost, UsageStats,
+};
 use crate::vendor_request::VendorRequest;
 use conf::{AgentKind, AgentSettings};
 
@@ -33,6 +38,9 @@ pub struct ClaudeAgent {
     api_model: String,
     token_limit: i64,
     usd_limit: f64,
+    input_price: f64,
+    output_price: f64,
+    cached_price: f64,
     usage: UsageStats,
     messages: Vec<Value>,
     http: VendorRequest,
@@ -58,6 +66,9 @@ impl ClaudeAgent {
             api_model,
             token_limit: agent.token_limit,
             usd_limit: agent.usd_limit,
+            input_price: agent.input_price,
+            output_price: agent.output_price,
+            cached_price: agent.cached_price,
             usage: UsageStats::default(),
             messages: Vec::new(),
             http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
@@ -92,6 +103,16 @@ impl ClaudeAgent {
         self.usage.requests += 1;
         self.usage.input_tokens += parsed.input_tokens;
         self.usage.output_tokens += parsed.output_tokens;
+        self.usage.cached_tokens += parsed.cached_tokens;
+        self.usage.total_cost_usd += approximate_usd(
+            parsed.input_tokens,
+            parsed.cached_tokens,
+            parsed.output_tokens,
+            self.input_price,
+            self.output_price,
+            self.cached_price,
+        );
+        self.usage.real_cost_usd = accumulate_real_cost(self.usage.real_cost_usd, parsed.real_cost);
         Ok(parsed)
     }
 
@@ -143,6 +164,9 @@ impl Agent for ClaudeAgent {
     fn consumed_usd(&self) -> f64 {
         self.usage.total_cost_usd
     }
+    fn consumed_usd_real(&self) -> Option<f64> {
+        self.usage.real_cost_usd
+    }
 
     fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
@@ -190,8 +214,18 @@ impl Agent for ClaudeAgent {
             "    ← output tokens: {}",
             self.usage.output_tokens
         ));
-        self.logger
-            .log_line(&format!("- total cost: {}$", self.usage.total_cost_usd));
+        self.logger.log_line(&format!(
+            "    ↔ cached tokens: {}",
+            self.usage.cached_tokens
+        ));
+        self.logger.log_line(&format!(
+            "- USD approximated: {}",
+            super::format_usd(self.usage.total_cost_usd)
+        ));
+        self.logger.log_line(&format!(
+            "- USD real: {}",
+            format_real_cost(self.usage.real_cost_usd)
+        ));
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {
@@ -232,6 +266,8 @@ struct ParsedClaude {
     content: Value,
     input_tokens: i64,
     output_tokens: i64,
+    cached_tokens: i64,
+    real_cost: Option<RealCost>,
 }
 
 /// Parse an Anthropic Messages API body (unit-tested on fixtures).
@@ -274,18 +310,30 @@ fn parse_claude_response(text: &str) -> Result<ParsedClaude, String> {
         Some(texts.join(""))
     };
     let usage = v.get("usage").cloned().unwrap_or(Value::Null);
+    let base_input = usage
+        .get("input_tokens")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(0);
+    let cache_read = usage
+        .get("cache_read_input_tokens")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(0);
+    let cache_creation = usage
+        .get("cache_creation_input_tokens")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(0);
+    let real_cost = real_cost_from_body(&v, &usage);
     Ok(ParsedClaude {
         text: text_out,
         tool_uses,
         content,
-        input_tokens: usage
-            .get("input_tokens")
-            .and_then(|x| x.as_i64())
-            .unwrap_or(0),
+        input_tokens: base_input + cache_read + cache_creation,
         output_tokens: usage
             .get("output_tokens")
             .and_then(|x| x.as_i64())
             .unwrap_or(0),
+        cached_tokens: cache_read,
+        real_cost,
     })
 }
 
