@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "conf"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "json5",
  "serde_json",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "chrono",
  "conf",
@@ -548,7 +548,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logger"
-version = "1.3.0"
+version = "1.4.0"
 
 [[package]]
 name = "lru-slab"
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "conf",
  "encoding_rs",
