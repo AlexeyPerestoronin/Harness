@@ -1,0 +1,12 @@
+{
+    "vendor": "SpaceXAI",
+    "name": "Grok 4.7",
+    // api-key or path to file with api-key
+    "api-key": "API_KEY_XAI",
+    "token-limit": 200000,
+    "iteration-limit": 50,
+    "USD-limit": 10,
+    "rpm": -1,
+    "tpm": -1,
+    "rpd": -1,
+}

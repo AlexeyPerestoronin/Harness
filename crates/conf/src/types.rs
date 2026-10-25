@@ -60,6 +60,9 @@ impl AgentKind {
             ("SpaceXAI", "Grok 4.6") => Ok(AgentKind::Xai {
                 api_model: "grok-4.6".into(),
             }),
+            ("SpaceXAI", "Grok 4.7") => Ok(AgentKind::Xai {
+                api_model: "grok-4.7".into(),
+            }),
             ("GoogleAI", "Gemini 3.8 Flash") => Ok(AgentKind::Google {
                 api_model: "gemini-3.8-flash".into(),
             }),
