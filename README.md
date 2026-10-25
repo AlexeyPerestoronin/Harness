@@ -53,7 +53,9 @@ Rules:
 
 - `vendor`, `name`
 - `api-key` — the key itself, or a path to a file that contains the key
-- `rpm`, `tpm`, `rpd` — required integers for every model. `-1` disables that limit; a positive integer enables it.
+- `limits` — required object (`tokens`, `USD`, `rpm`, `tpm`, `rpd`). Missing `limits` is an error before the cycle starts. `rpm` / `tpm` / `rpd` are integers, `-1` or `>= 1` (`-1` disables that limit). `tokens` is an integer, `-1` or `>= 1`. `USD` is a number, `-1` or `>= 0`. Session `token-limit` / `USD-limit` still come only from `harness.json5`.
+- `price` — required object (`input-price`, `output-price`, `cached-price`), USD per 1_000_000 tokens. `-1` means free. Missing `price` is an error before the cycle starts.
+- There is no `iteration-limit` in the model file. Session iterations are set only in `harness.json5`.
 
 Known agents:
 

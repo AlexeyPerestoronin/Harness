@@ -106,9 +106,10 @@ impl AgentKind {
 
 /// An agent json5 file found while scanning a directory.
 ///
-/// Produced without reading `api-key` or checking rate limits; full validation
-/// happens only after the caller picks one candidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Produced without reading `api-key` or `limits.USD`. `limits.tokens`,
+/// `rpm` / `tpm` / `rpd` and prices are filled so a menu can show the model.
+/// Full validation, including the API key, runs only for the chosen file.
+#[derive(Debug, Clone)]
 pub struct AgentCandidate {
     /// Absolute path to the agent file.
     pub path: PathBuf,
@@ -116,6 +117,41 @@ pub struct AgentCandidate {
     pub vendor: String,
     /// Display name from the file (`Grok 4.6`, ...).
     pub name: String,
+    /// `limits.tokens` (`-1` = unlimited). Not the session token limit.
+    pub token_limit: i64,
+    /// Requests per minute (`-1` = not enforced).
+    pub rpm: i64,
+    /// Tokens per minute (`-1` = not enforced).
+    pub tpm: i64,
+    /// Requests per day (`-1` = not enforced).
+    pub rpd: i64,
+    /// USD per 1_000_000 input tokens (`-1` = free).
+    pub input_price: f64,
+    /// USD per 1_000_000 output tokens (`-1` = free).
+    pub output_price: f64,
+    /// USD per 1_000_000 cached tokens (`-1` = free).
+    pub cached_price: f64,
+}
+
+impl PartialEq for AgentCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.vendor == other.vendor
+            && self.name == other.name
+            && self.token_limit == other.token_limit
+            && self.rpm == other.rpm
+            && self.tpm == other.tpm
+            && self.rpd == other.rpd
+            && same_price(self.input_price, other.input_price)
+            && same_price(self.output_price, other.output_price)
+            && same_price(self.cached_price, other.cached_price)
+    }
+}
+
+impl Eq for AgentCandidate {}
+
+fn same_price(left: f64, right: f64) -> bool {
+    left.to_bits() == right.to_bits()
 }
 
 /// Fully resolved harness configuration.
@@ -136,7 +172,7 @@ pub struct Settings {
     pub source: serde_json::Value,
 }
 
-/// Model identity, resolved API key and session limits.
+/// Model identity, resolved API key, session limits and model prices.
 #[derive(Debug, Clone)]
 pub struct AgentSettings {
     /// Vendor string from the model file (`SpaceXAI` / `GoogleAI` / `Claude` / `DeepSeek` / `AliBaba`).
@@ -161,6 +197,12 @@ pub struct AgentSettings {
     pub tpm: i64,
     /// Requests per day (`-1` = not enforced).
     pub rpd: i64,
+    /// USD per 1_000_000 input tokens (`-1` = free, kept as `-1`).
+    pub input_price: f64,
+    /// USD per 1_000_000 output tokens (`-1` = free, kept as `-1`).
+    pub output_price: f64,
+    /// USD per 1_000_000 cached tokens (`-1` = free, kept as `-1`).
+    pub cached_price: f64,
     /// Absolute path of the agent json5 file that was loaded.
     pub config_path: PathBuf,
 }

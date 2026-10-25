@@ -49,12 +49,28 @@ pub const VENDOR: &str = "vendor";
 pub const NAME: &str = "name";
 /// API key string or path to a file with the key. Required.
 pub const API_KEY: &str = "api-key";
-/// Requests per minute. `-1` = not enforced. Required for every model.
+/// Requests per minute inside [`LIMITS`]. `-1` = not enforced.
 pub const RPM: &str = "rpm";
-/// Tokens per minute. `-1` = not enforced. Required for every model.
+/// Tokens per minute inside [`LIMITS`]. `-1` = not enforced.
 pub const TPM: &str = "tpm";
-/// Requests per day. `-1` = not enforced. Required for every model.
+/// Requests per day inside [`LIMITS`]. `-1` = not enforced.
 pub const RPD: &str = "rpd";
+/// Required model-file object: `tokens`, `USD`, `rpm`, `tpm`, `rpd`.
+pub const LIMITS: &str = "limits";
+/// Token cap inside [`LIMITS`]. `-1` or `>= 1`. Not the session token limit.
+pub const LIMIT_TOKENS: &str = "tokens";
+/// USD cap inside [`LIMITS`]. `-1` or `>= 0`. Not the session USD limit.
+pub const LIMIT_USD: &str = "USD";
+/// Required model-file object: input / output / cached prices.
+pub const PRICE: &str = "price";
+/// USD per 1_000_000 input tokens. `-1` = free.
+pub const INPUT_PRICE: &str = "input-price";
+/// USD per 1_000_000 output tokens. `-1` = free.
+pub const OUTPUT_PRICE: &str = "output-price";
+/// USD per 1_000_000 cached tokens. `-1` = free.
+pub const CACHED_PRICE: &str = "cached-price";
+/// Legacy iteration key. Not allowed in the model file.
+pub const ITERATIONS: &str = "iterations";
 
 // ---------------------------------------------------------------------------
 // Tool module names (keys of the `tools` object)

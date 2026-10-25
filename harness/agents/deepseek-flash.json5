@@ -3,10 +3,16 @@
     "name": "DeepSeek-Flash",
     // api-key or path to file with api-key
     "api-key": "API_KEY_DEEP_SEEK",
-    "token-limit": -1,
-    "iteration-limit": 50,
-    "USD-limit": -1,
-    "rpm": -1,
-    "tpm": -1,
-    "rpd": -1,
+    "limits": {
+        "tokens": -1,
+        "USD": -1,
+        "rpm": -1,
+        "tpm": -1,
+        "rpd": -1,
+    },
+    "price": {
+        "input-price": 0.15, // USD per 1_000_000 input tokens
+        "output-price": 0.60, // USD per 1_000_000 output tokens
+        "cached-price": 0.003, // -1 = free
+    },
 }

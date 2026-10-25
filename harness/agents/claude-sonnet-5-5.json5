@@ -3,10 +3,16 @@
     "name": "Claude Sonnet 5.5",
     // api-key or path to file with api-key
     "api-key": "API_KEY_CLAUDE",
-    "token-limit": 500000,
-    "iteration-limit": -1,
-    "USD-limit": -1,
-    "rpm": -1,
-    "tpm": -1,
-    "rpd": -1,
+    "limits": {
+        "tokens": 500000,
+        "USD": -1,
+        "rpm": -1,
+        "tpm": -1,
+        "rpd": -1,
+    },
+    "price": {
+        "input-price": 2.00, // USD per 1_000_000 input tokens
+        "output-price": 10.00, // USD per 1_000_000 output tokens
+        "cached-price": 0.10, // -1 = free
+    },
 }

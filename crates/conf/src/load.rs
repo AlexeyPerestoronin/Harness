@@ -1,4 +1,8 @@
 //! Load `harness.json5` and the nested model file into [`crate::Settings`].
+//!
+//! A model file must contain `limits` and `price`. Flat legacy keys
+//! (`token-limit`, `iteration-limit`, `rpm`, ...) are a load error, not a
+//! silent migration. Session limits still come from `harness.json5`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -119,8 +123,8 @@ fn rewrite_agent_config(root: &mut Value, config_path: &Path) {
 /// Load a model json5 file into [`AgentSettings`].
 ///
 /// `mode` is not a model-file field; the caller supplies it.
-/// Session limits (`token-limit`, `iteration-limit`, `USD-limit`) are read from
-/// the model file (unlike [`load`], which takes them from `harness.json5`).
+/// `token_limit` and `usd_limit` come from `limits`. `iteration_limit` is
+/// always `-1`: session iterations live only in `harness.json5`.
 pub fn load_model(model_path: &Path, mode: Mode) -> Result<AgentSettings, ConfError> {
     let model_path = if model_path.is_absolute() {
         model_path.to_path_buf()
@@ -236,26 +240,17 @@ fn report_skipped(skipped: &[SkippedFile]) {
 fn settings_from_model(
     model_obj: &serde_json::Map<String, Value>,
     mode: Mode,
-    limits: Option<(i64, i64, f64)>,
+    session_limits: Option<(i64, i64, f64)>,
     config_path: PathBuf,
 ) -> Result<AgentSettings, ConfError> {
+    let numbers = read_model_numbers(model_obj, true)?;
     let vendor = required_string(model_obj, keys::VENDOR)?;
     let name = required_string(model_obj, keys::NAME)?;
     let api_key = resolve_api_key(model_obj)?;
     let kind = AgentKind::from_vendor_name(&vendor, &name)?;
 
-    let rpm = required_model_int(model_obj, keys::RPM)?;
-    let tpm = required_model_int(model_obj, keys::TPM)?;
-    let rpd = required_model_int(model_obj, keys::RPD)?;
-
-    let (token_limit, iteration_limit, usd_limit) = match limits {
-        Some(v) => v,
-        None => (
-            required_i64(model_obj, keys::TOKEN_LIMIT)?,
-            required_i64(model_obj, keys::ITERATION_LIMIT)?,
-            required_f64(model_obj, keys::USD_LIMIT)?,
-        ),
-    };
+    let (token_limit, iteration_limit, usd_limit) =
+        session_limits.unwrap_or((numbers.token_limit, -1, numbers.usd_limit));
 
     Ok(AgentSettings {
         vendor,
@@ -266,9 +261,12 @@ fn settings_from_model(
         token_limit,
         iteration_limit,
         usd_limit,
-        rpm,
-        tpm,
-        rpd,
+        rpm: numbers.rpm,
+        tpm: numbers.tpm,
+        rpd: numbers.rpd,
+        input_price: numbers.input_price,
+        output_price: numbers.output_price,
+        cached_price: numbers.cached_price,
         config_path,
     })
 }
@@ -636,5 +634,569 @@ fn strict_i64(value: &Value) -> Option<i64> {
             .as_i64()
             .or_else(|| n.as_u64().and_then(|u| i64::try_from(u).ok())),
         _ => None,
+    }
+}
+
+/// `limits` / `price` fields a directory listing needs. `limits.USD` is not included.
+pub(crate) struct ModelCandidateFields {
+    pub token_limit: i64,
+    pub rpm: i64,
+    pub tpm: i64,
+    pub rpd: i64,
+    pub input_price: f64,
+    pub output_price: f64,
+    pub cached_price: f64,
+}
+
+/// Validate a model object for scanning. Does not read `api-key` or `limits.USD`.
+pub(crate) fn model_candidate_fields(
+    model_obj: &serde_json::Map<String, Value>,
+) -> Result<ModelCandidateFields, ConfError> {
+    let numbers = read_model_numbers(model_obj, false)?;
+    Ok(ModelCandidateFields {
+        token_limit: numbers.token_limit,
+        rpm: numbers.rpm,
+        tpm: numbers.tpm,
+        rpd: numbers.rpd,
+        input_price: numbers.input_price,
+        output_price: numbers.output_price,
+        cached_price: numbers.cached_price,
+    })
+}
+
+struct ModelNumbers {
+    token_limit: i64,
+    /// Valid only when `require_usd` was true. Otherwise unused.
+    usd_limit: f64,
+    rpm: i64,
+    tpm: i64,
+    rpd: i64,
+    input_price: f64,
+    output_price: f64,
+    cached_price: f64,
+}
+
+fn read_model_numbers(
+    model_obj: &serde_json::Map<String, Value>,
+    require_usd: bool,
+) -> Result<ModelNumbers, ConfError> {
+    reject_legacy_model_keys(model_obj)?;
+    let limits = required_model_object(model_obj, keys::LIMITS)?;
+    reject_unknown_keys(
+        limits,
+        &[
+            keys::LIMIT_TOKENS,
+            keys::LIMIT_USD,
+            keys::RPM,
+            keys::TPM,
+            keys::RPD,
+        ],
+        keys::LIMITS,
+    )?;
+    let token_limit = required_model_int(limits, keys::LIMIT_TOKENS)?;
+    let usd_limit = if require_usd {
+        required_model_non_negative(limits, keys::LIMIT_USD)?
+    } else {
+        0.0
+    };
+    let rpm = required_model_int(limits, keys::RPM)?;
+    let tpm = required_model_int(limits, keys::TPM)?;
+    let rpd = required_model_int(limits, keys::RPD)?;
+    let price = read_price(model_obj)?;
+    Ok(ModelNumbers {
+        token_limit,
+        usd_limit,
+        rpm,
+        tpm,
+        rpd,
+        input_price: price.input,
+        output_price: price.output,
+        cached_price: price.cached,
+    })
+}
+
+struct ModelPrice {
+    input: f64,
+    output: f64,
+    cached: f64,
+}
+
+fn read_price(model_obj: &serde_json::Map<String, Value>) -> Result<ModelPrice, ConfError> {
+    let price = required_model_object(model_obj, keys::PRICE)?;
+    reject_unknown_keys(
+        price,
+        &[keys::INPUT_PRICE, keys::OUTPUT_PRICE, keys::CACHED_PRICE],
+        keys::PRICE,
+    )?;
+    Ok(ModelPrice {
+        input: required_model_non_negative(price, keys::INPUT_PRICE)?,
+        output: required_model_non_negative(price, keys::OUTPUT_PRICE)?,
+        cached: required_model_non_negative(price, keys::CACHED_PRICE)?,
+    })
+}
+
+fn reject_legacy_model_keys(obj: &serde_json::Map<String, Value>) -> Result<(), ConfError> {
+    const LEGACY: &[&str] = &[
+        keys::TOKEN_LIMIT,
+        keys::ITERATION_LIMIT,
+        keys::ITERATIONS,
+        keys::USD_LIMIT,
+        keys::RPM,
+        keys::TPM,
+        keys::RPD,
+    ];
+    for key in LEGACY {
+        if obj.contains_key(*key) {
+            return Err(ConfError::new(format!(
+                "'{key}' is not allowed in the model file"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn reject_unknown_keys(
+    obj: &serde_json::Map<String, Value>,
+    allowed: &[&str],
+    parent: &str,
+) -> Result<(), ConfError> {
+    for key in obj.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Err(ConfError::new(format!("unknown key '{key}' in '{parent}'")));
+        }
+    }
+    Ok(())
+}
+
+fn required_model_object<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<&'a serde_json::Map<String, Value>, ConfError> {
+    match obj.get(key) {
+        Some(Value::Object(map)) => Ok(map),
+        _ => Err(ConfError::new(format!(
+            "please define '{key}' in the model conf file"
+        ))),
+    }
+}
+
+fn required_model_non_negative(
+    obj: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<f64, ConfError> {
+    match obj.get(key) {
+        None => Err(ConfError::new(format!(
+            "please define '{key}' in the model conf file"
+        ))),
+        Some(v) => match strict_f64(v) {
+            Some(n) if n.is_finite() && (n == -1.0 || n >= 0.0) => Ok(n),
+            _ => Err(ConfError::new(format!(
+                "'{key}' must be -1 or a non-negative number"
+            ))),
+        },
+    }
+}
+
+fn strict_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Model-file `limits` + `price`. No network and no live API keys.
+
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use super::{load_model, load_with};
+    use crate::scan::scan_agent_dir;
+    use crate::str::keys;
+    use crate::types::Mode;
+
+    fn temp_case(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("conf-limits-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn please_define(key: &str) -> String {
+        format!("please define '{key}' in the model conf file")
+    }
+
+    fn not_allowed(key: &str) -> String {
+        format!("'{key}' is not allowed in the model file")
+    }
+
+    fn non_negative(key: &str) -> String {
+        format!("'{key}' must be -1 or a non-negative number")
+    }
+
+    fn model(middle: &str) -> String {
+        format!(
+            r#"{{
+                "vendor": "AliBaba",
+                "name": "Qwen-Turbo",
+                "api-key": "literal-key",
+                {middle}
+            }}"#
+        )
+    }
+
+    const LIMITS_OK: &str =
+        r#""limits": {"tokens": -1, "USD": -1, "rpm": -1, "tpm": -1, "rpd": -1}"#;
+    const PRICE_OK: &str =
+        r#""price": {"input-price": 0.05, "output-price": 0.20, "cached-price": -1}"#;
+
+    #[test]
+    fn load_model_reads_limits_and_price() {
+        let dir = temp_case("example");
+        let path = write(
+            &dir,
+            "qwen-turbo.json5",
+            r#"{
+                "vendor": "AliBaba",
+                "name": "Qwen-Turbo",
+                "api-key": "api-key or path to file with api-key",
+                "limits": {
+                    "tokens": -1,
+                    "USD": -1,
+                    "rpm": 1500,
+                    "tpm": 1000000,
+                    "rpd": -1
+                },
+                "price": {
+                    "input-price": 0.05,
+                    "output-price": 0.20,
+                    "cached-price": -1
+                }
+            }"#,
+        );
+        let settings = load_model(&path, Mode::Safe).unwrap();
+        assert_eq!(settings.input_price, 0.05);
+        assert_eq!(settings.output_price, 0.20);
+        assert_eq!(settings.cached_price, -1.0);
+        assert_eq!(settings.rpm, 1500);
+        assert_eq!(settings.iteration_limit, -1);
+        assert_eq!(settings.token_limit, -1);
+        assert_eq!(settings.usd_limit, -1.0);
+        assert_eq!(settings.tpm, 1_000_000);
+        assert_eq!(settings.rpd, -1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_with_keeps_session_limits() {
+        let dir = temp_case("session");
+        write(
+            &dir,
+            "model.json5",
+            r#"{
+                "vendor": "AliBaba",
+                "name": "Qwen-Turbo",
+                "api-key": "literal-key",
+                "limits": {"tokens": 42, "USD": 9, "rpm": 12, "tpm": 34, "rpd": 5},
+                "price": {"input-price": 1.25, "output-price": 4.5, "cached-price": 0}
+            }"#,
+        );
+        let conf = write(
+            &dir,
+            "harness.json5",
+            r#"{
+                "cwd": "workspace",
+                "agent": {
+                    "config": "model.json5",
+                    "mode": "safe",
+                    "token-limit": 1000,
+                    "iteration-limit": 7,
+                    "USD-limit": 3.5
+                }
+            }"#,
+        );
+        let settings = load_with(&conf, |_| panic!("chooser must not run")).unwrap();
+        let agent = &settings.agent;
+        assert_eq!(agent.token_limit, 1000);
+        assert_eq!(agent.iteration_limit, 7);
+        assert_eq!(agent.usd_limit, 3.5);
+        assert_eq!(agent.rpm, 12);
+        assert_eq!(agent.tpm, 34);
+        assert_eq!(agent.rpd, 5);
+        assert_eq!(agent.input_price, 1.25);
+        assert_eq!(agent.output_price, 4.5);
+        assert_eq!(agent.cached_price, 0.0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn model_file_errors_have_spec_text() {
+        let dir = temp_case("errors");
+        let cases = [
+            (model(LIMITS_OK), please_define(keys::PRICE)),
+            (
+                model(&format!(
+                    r#"{LIMITS_OK}, "price": {{"output-price": 0.2, "cached-price": -1}}"#
+                )),
+                please_define(keys::INPUT_PRICE),
+            ),
+            (
+                model(&format!(
+                    r#"{LIMITS_OK}, "price": {{"input-price": 0.05, "output-price": 0.2, "cached-price": -0.5}}"#
+                )),
+                non_negative(keys::CACHED_PRICE),
+            ),
+            (
+                model(&format!(r#""rpm": 10, {LIMITS_OK}, {PRICE_OK}"#)),
+                not_allowed(keys::RPM),
+            ),
+            (
+                model(&format!(
+                    r#""iteration-limit": 50, {LIMITS_OK}, {PRICE_OK}"#
+                )),
+                not_allowed(keys::ITERATION_LIMIT),
+            ),
+            (
+                model(&format!(r#""iterations": 3, {LIMITS_OK}, {PRICE_OK}"#)),
+                not_allowed(keys::ITERATIONS),
+            ),
+        ];
+        for (body, expected) in cases {
+            let path = write(&dir, "model.json5", &body);
+            let err = load_model(&path, Mode::Safe).expect_err("load must fail before HTTP");
+            assert_eq!(err.to_string(), expected);
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn scan_skips_flat_file_without_reading_api_key() {
+        let dir = temp_case("scan");
+        write(
+            &dir,
+            "new.json5",
+            r#"{
+                "vendor": "AliBaba",
+                "name": "Qwen-Turbo",
+                "api-key": "missing-api-key.txt",
+                "limits": {"tokens": 10, "USD": -1, "rpm": 1500, "tpm": 1000, "rpd": -1},
+                "price": {"input-price": 0.05, "output-price": 0.20, "cached-price": -1}
+            }"#,
+        );
+        write(
+            &dir,
+            "old.json5",
+            r#"{
+                "vendor": "AliBaba",
+                "name": "Qwen-Plus",
+                "api-key": "also-missing-key.txt",
+                "token-limit": -1,
+                "iteration-limit": 50,
+                "USD-limit": -1,
+                "rpm": 1,
+                "tpm": 1,
+                "rpd": -1
+            }"#,
+        );
+        assert!(!dir.join("missing-api-key.txt").exists());
+        let (candidates, skipped) = scan_agent_dir(&dir).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let c = &candidates[0];
+        assert_eq!(c.name, "Qwen-Turbo");
+        assert_eq!(c.token_limit, 10);
+        assert_eq!(c.rpm, 1500);
+        assert_eq!(c.tpm, 1000);
+        assert_eq!(c.rpd, -1);
+        assert_eq!(c.input_price, 0.05);
+        assert_eq!(c.output_price, 0.20);
+        assert_eq!(c.cached_price, -1.0);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].file, "old.json5");
+        assert_eq!(skipped[0].reason, not_allowed(keys::TOKEN_LIMIT));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn shipped_agents_match_price_table() {
+        struct Row {
+            file: &'static str,
+            tokens: i64,
+            usd: f64,
+            rpm: i64,
+            tpm: i64,
+            rpd: i64,
+            input: f64,
+            output: f64,
+            cached: f64,
+        }
+        let rows = [
+            Row {
+                file: "claude-sonnet-5-5.json5",
+                tokens: 500_000,
+                usd: -1.0,
+                rpm: -1,
+                tpm: -1,
+                rpd: -1,
+                input: 2.00,
+                output: 10.00,
+                cached: 0.10,
+            },
+            Row {
+                file: "deepseek-flash.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: -1,
+                tpm: -1,
+                rpd: -1,
+                input: 0.15,
+                output: 0.60,
+                cached: 0.003,
+            },
+            Row {
+                file: "deepseek-r1.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: -1,
+                tpm: -1,
+                rpd: -1,
+                input: 0.55,
+                output: 2.19,
+                cached: -1.0,
+            },
+            Row {
+                file: "deepseek-v3.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: -1,
+                tpm: -1,
+                rpd: -1,
+                input: 0.14,
+                output: 0.28,
+                cached: 0.014,
+            },
+            Row {
+                file: "deepseek-v4-pro.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: -1,
+                tpm: -1,
+                rpd: -1,
+                input: 0.66,
+                output: 1.98,
+                cached: -1.0,
+            },
+            Row {
+                file: "gemini-3.1-flash-lite.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: 15,
+                tpm: 250_000,
+                rpd: 500,
+                input: 0.25,
+                output: 1.50,
+                cached: 0.025,
+            },
+            Row {
+                file: "gemini-3.5-flash-lite.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: 15,
+                tpm: 250_000,
+                rpd: 500,
+                input: 0.30,
+                output: 2.50,
+                cached: 0.03,
+            },
+            Row {
+                file: "gemini-3.8-flash.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: 5,
+                tpm: 250_000,
+                rpd: 20,
+                input: 0.375,
+                output: 1.875,
+                cached: 0.0375,
+            },
+            Row {
+                file: "grok-4.6.json5",
+                tokens: 200_000,
+                usd: 10.0,
+                rpm: -1,
+                tpm: -1,
+                rpd: -1,
+                input: 2.00,
+                output: 6.00,
+                cached: 0.50,
+            },
+            Row {
+                file: "grok-4.7.json5",
+                tokens: 200_000,
+                usd: 10.0,
+                rpm: -1,
+                tpm: -1,
+                rpd: -1,
+                input: 2.00,
+                output: 6.00,
+                cached: 0.50,
+            },
+            Row {
+                file: "qwen-max.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: 60,
+                tpm: 60_000,
+                rpd: -1,
+                input: 2.00,
+                output: 6.00,
+                cached: 0.20,
+            },
+            Row {
+                file: "qwen-plus.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: 1500,
+                tpm: 1_000_000,
+                rpd: -1,
+                input: 0.40,
+                output: 1.60,
+                cached: -1.0,
+            },
+            Row {
+                file: "qwen-turbo.json5",
+                tokens: -1,
+                usd: -1.0,
+                rpm: 1500,
+                tpm: 1_000_000,
+                rpd: -1,
+                input: 0.05,
+                output: 0.20,
+                cached: -1.0,
+            },
+        ];
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("harness")
+            .join("agents");
+        for row in rows {
+            let settings = load_model(&dir.join(row.file), Mode::Safe)
+                .unwrap_or_else(|e| panic!("{}: {e}", row.file));
+            assert_eq!(settings.token_limit, row.tokens, "{}", row.file);
+            assert_eq!(settings.usd_limit, row.usd, "{}", row.file);
+            assert_eq!(settings.iteration_limit, -1, "{}", row.file);
+            assert_eq!(settings.rpm, row.rpm, "{}", row.file);
+            assert_eq!(settings.tpm, row.tpm, "{}", row.file);
+            assert_eq!(settings.rpd, row.rpd, "{}", row.file);
+            assert_eq!(settings.input_price, row.input, "{}", row.file);
+            assert_eq!(settings.output_price, row.output, "{}", row.file);
+            assert_eq!(settings.cached_price, row.cached, "{}", row.file);
+        }
     }
 }

@@ -1,9 +1,10 @@
 //! Scan a directory for agent json5 files without reading API keys.
 //!
 //! Only the directory root is listed (no recursion). A `.json5` file becomes a
-//! candidate when vars-substitution + json5 parse yields an object with a known
-//! `vendor` + `name` pair. `api-key`, `rpm` and session limits are not checked
-//! here; full validation runs only for the file the caller chooses.
+//! candidate when vars-substitution + json5 parse yields a known `vendor` +
+//! `name` and a `limits` / `price` block valid enough to show the model.
+//! `api-key` is not read. `limits.USD` is checked only for the chosen file.
+//! A legacy flat key, or an invalid `limits` / `price`, skips that file only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -76,8 +77,8 @@ fn file_name_lower(path: &Path) -> String {
     file_name(path).to_ascii_lowercase()
 }
 
-/// Same read pipeline as a normal agent file (vars → json5), but only
-/// `vendor` / `name` / `agent_kind` are inspected.
+/// Same read pipeline as a normal agent file (vars → json5). Does not read
+/// `api-key`. Rejects legacy root keys and invalid `limits` / `price` fields.
 fn candidate_from_file(path: &Path) -> Result<AgentCandidate, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read: {e}"))?;
     let text =
@@ -89,10 +90,18 @@ fn candidate_from_file(path: &Path) -> Result<AgentCandidate, String> {
     let vendor = required_string(obj, keys::VENDOR)?;
     let name = required_string(obj, keys::NAME)?;
     AgentKind::from_vendor_name(&vendor, &name).map_err(|e| e.to_string())?;
+    let fields = crate::load::model_candidate_fields(obj).map_err(|e| e.to_string())?;
     Ok(AgentCandidate {
         path: path.to_path_buf(),
         vendor,
         name,
+        token_limit: fields.token_limit,
+        rpm: fields.rpm,
+        tpm: fields.tpm,
+        rpd: fields.rpd,
+        input_price: fields.input_price,
+        output_price: fields.output_price,
+        cached_price: fields.cached_price,
     })
 }
 
