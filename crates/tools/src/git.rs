@@ -48,9 +48,7 @@ impl GitModule {
     pub fn descriptors() -> Vec<ToolDescriptor> {
         vec![
             desc("is_file_under_git", "Check whether a file is tracked by git.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
-            desc("apply_diff_patch",
-                "Apply a unified diff patch to files. The patch MUST strictly follow the standard `git diff` format, including correct file headers (--- and +++) and hunk headers with line numbers and control symbols (e.g., @@ -185,12 +185,6 @@). Do not truncate the patch or skip headers, as it uses `git apply` under the hood and will fail on malformed diffs.",
-                json!({"type":"object","properties":{"patch":{"type":"string"}},"required":["patch"]})),
+            desc("apply_diff_patch", "Apply a diff patch to files (git-style, because it uses git apply under the hood).", json!({"type":"object","properties":{"patch":{"type":"string"}},"required":["patch"]})),
             desc("get_file_diff", "Get the diff for the target file.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
             desc("discard_file_changes", "Discard file changes after HEAD.", json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})),
         ]
