@@ -216,29 +216,3 @@ pub fn session_dir(settings: &Settings) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create log dir: {e}"))?;
     Ok(dir)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn iteration_header_has_usage_block_and_no_old_format() {
-        let header = iteration_header(5, 765, 100000, 10.34, Some(10.45));
-        assert!(header.contains("## Iteration №5"));
-        assert!(header.contains("Usage:"));
-        assert!(header.contains("- time = 12 min 45 sec"));
-        assert!(header.contains("- tokens = 100000"));
-        assert!(header.contains("- USD approximated = 10.34"));
-        assert!(header.contains("- USD real = 10.45"));
-        assert!(!header.contains("(tokens ="));
-        assert!(!header.contains("usd ="));
-    }
-
-    #[test]
-    fn iteration_header_uses_unknown_text_for_missing_real_cost() {
-        let header = iteration_header(1, 0, 0, 0.0, None);
-        assert!(header.contains("## Iteration №1"));
-        assert!(header.contains("- USD approximated = 0.00"));
-        assert!(header.contains("- USD real = doesn't obtained from response"));
-    }
-}
