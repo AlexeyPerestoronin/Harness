@@ -8,6 +8,8 @@
 //! `reqwest` — no async runtime and no extra retry middleware.
 
 use std::collections::VecDeque;
+use std::io::{self, Write};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,9 +25,6 @@ const MAX_ATTEMPTS: u32 = 24;
 const TPM_WINDOW: Duration = Duration::from_secs(60);
 /// Sliding window for requests-per-day (24 hours, no vendor timezone).
 const RPD_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
-/// HTTP client timeout used by every vendor.
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(300);
-
 /// Monotonic clock plus sleep, swapped for a fake in unit tests.
 trait Clock: Send + Sync {
     fn now(&self) -> Duration;
@@ -219,10 +218,8 @@ impl VendorRequest {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            client: Client::builder()
-                .timeout(CLIENT_TIMEOUT)
-                .build()
-                .expect("reqwest client"),
+            // No response timeout: the model may keep thinking indefinitely.
+            client: Client::builder().build().expect("reqwest client"),
             limiter: RateLimit::new(rpm, tpm, rpd),
             logger,
             clock,
@@ -262,15 +259,24 @@ impl VendorRequest {
         )
     }
 
-    fn execute<F>(&mut self, mut send_once: F) -> Result<String, String>
+    fn execute<F>(&mut self, send_once: F) -> Result<String, String>
     where
-        F: FnMut() -> Result<(u16, String), String>,
+        F: FnMut() -> Result<(u16, String), String> + Send,
+    {
+        let mut stdout = io::stdout();
+        self.execute_with_writer(send_once, &mut stdout)
+    }
+
+    fn execute_with_writer<F, W>(&mut self, mut send_once: F, out: &mut W) -> Result<String, String>
+    where
+        F: FnMut() -> Result<(u16, String), String> + Send,
+        W: Write,
     {
         let clock = self.clock.clone();
         let mut last_err = "Request failed after max retries".to_string();
         for attempt in 1..=MAX_ATTEMPTS {
             self.limiter.wait(&*clock);
-            match send_once() {
+            match run_attempt(&mut send_once, out) {
                 Err(e) => {
                     last_err = format!("⚠️ {attempt}-attempt request failed: {e}");
                     self.logger.log_line(&last_err);
@@ -301,6 +307,58 @@ impl VendorRequest {
     }
 }
 
+/// Format a duration in whole seconds as `X min Y sec`.
+fn format_waiting_time(secs: u64) -> String {
+    format!("{} min {} sec", secs / 60, secs % 60)
+}
+
+/// Build one stopwatch line. `first` controls the leading `\n` / `\r`, and
+/// shorter lines are padded with spaces up to the previous visible length.
+fn waiting_update(secs: u64, first: bool, previous_len: usize) -> (String, usize) {
+    let text = format!("response waiting time: {}", format_waiting_time(secs));
+    let prefix = if first { "\n" } else { "\r" };
+    let padding = " ".repeat(previous_len.saturating_sub(text.len()));
+    let line = format!("{prefix}{text}{padding}");
+    (line, previous_len.max(text.len()))
+}
+
+/// Run one `send_once` in a scoped thread and wait for its result, printing
+/// the console stopwatch every second while the request is in flight.
+fn run_attempt<F, W>(send_once: &mut F, out: &mut W) -> Result<(u16, String), String>
+where
+    F: FnMut() -> Result<(u16, String), String> + Send,
+    W: Write,
+{
+    let (tx, rx) = mpsc::channel::<Result<(u16, String), String>>();
+    let started = Instant::now();
+    let mut first = true;
+    let mut previous_len = 0;
+
+    thread::scope(|scope| {
+        scope.spawn(move || {
+            let result = send_once();
+            let _ = tx.send(result);
+        });
+
+        loop {
+            match rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(result) => return result,
+                Err(RecvTimeoutError::Timeout) => {
+                    let (line, new_len) =
+                        waiting_update(started.elapsed().as_secs(), first, previous_len);
+                    let _ = out.write_all(line.as_bytes());
+                    let _ = out.flush();
+                    first = false;
+                    previous_len = new_len;
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err("response waiting thread failed".to_string());
+                }
+            }
+        }
+    })
+}
+
 /// Headers first, then `.json()`.
 ///
 /// `RequestBuilder::header` *appends*. Calling `.json()` first sets
@@ -319,4 +377,102 @@ fn json_post(
         builder = builder.header(k, v);
     }
     builder.json(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use logger::NullLogger;
+
+    struct FakeClock;
+
+    impl Clock for FakeClock {
+        fn now(&self) -> Duration {
+            Duration::ZERO
+        }
+
+        fn sleep(&self, _duration: Duration) {}
+    }
+
+    fn test_vendor() -> VendorRequest {
+        VendorRequest::new_with_clock(-1, -1, -1, Arc::new(NullLogger), Arc::new(FakeClock))
+    }
+
+    #[test]
+    fn format_waiting_time_splits_minutes_and_seconds() {
+        assert_eq!(format_waiting_time(1), "0 min 1 sec");
+        assert_eq!(format_waiting_time(59), "0 min 59 sec");
+        assert_eq!(format_waiting_time(60), "1 min 0 sec");
+        assert_eq!(format_waiting_time(100), "1 min 40 sec");
+    }
+
+    #[test]
+    fn waiting_update_prefixes_and_pads_lines() {
+        let (first, first_len) = waiting_update(1, true, 0);
+        assert_eq!(
+            first,
+            format!("\nresponse waiting time: {}", format_waiting_time(1))
+        );
+        assert_eq!(first_len, first.len() - 1);
+
+        let (second, second_len) = waiting_update(1, false, first_len);
+        assert_eq!(
+            second,
+            format!("\rresponse waiting time: {}", format_waiting_time(1))
+        );
+        assert_eq!(second_len, first_len);
+
+        let (third, third_len) = waiting_update(1, false, first_len + 3);
+        assert_eq!(third.len(), first_len + 3 + 1);
+        assert_eq!(third_len, first_len + 3);
+    }
+
+    #[test]
+    fn execute_immediate_ok_returns_body_and_prints_no_waiting_time() {
+        let mut vendor = test_vendor();
+        let mut out: Vec<u8> = Vec::new();
+
+        let result = vendor.execute_with_writer(
+            || -> Result<(u16, String), String> { Ok((200, "ok".to_string())) },
+            &mut out,
+        );
+
+        assert_eq!(result, Ok("ok".to_string()));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn execute_retries_transport_error_then_returns_ok() {
+        let mut vendor = test_vendor();
+        let mut out: Vec<u8> = Vec::new();
+        let mut attempts = 0;
+
+        let result = vendor.execute_with_writer(
+            || -> Result<(u16, String), String> {
+                attempts += 1;
+                if attempts == 1 {
+                    Err("boom".to_string())
+                } else {
+                    Ok((200, "ok".to_string()))
+                }
+            },
+            &mut out,
+        );
+
+        assert_eq!(result, Ok("ok".to_string()));
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn execute_fails_on_non_retryable_http_status() {
+        let mut vendor = test_vendor();
+        let mut out: Vec<u8> = Vec::new();
+
+        let result = vendor.execute_with_writer(
+            || -> Result<(u16, String), String> { Ok((400, "bad".to_string())) },
+            &mut out,
+        );
+
+        assert_eq!(result, Err("HTTP 400: bad".to_string()));
+    }
 }
