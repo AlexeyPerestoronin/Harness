@@ -1,0 +1,76 @@
+# Задача на исправление: Агентский цикл может выходить за пределы CWD
+
+## Как есть сейчас:
+
+- `Settings.cwd` используется для каталога логов и git-подпроцессов, но `tools.fs` (`Sandbox`) разрешает относительные пути к файлам относительно process cwd, а не относительно CWD.
+- `Sandbox::check_access` не проверяет, что абсолютный/нормализованный путь находится внутри корневого CWD; пути вида `../../../outside` могут быть разрешены, если соответствующая директория входит в allow-list.
+- Списки `available-dirs`, `available-files`, `deprecated-dirs`, `deprecated-files` трактуются относительно process cwd и могут указывать за пределы CWD.
+- `UserModule::request_command_shell_execution` выполняет команду в произвольном `cwd`, переданном моделью, без проверки CWD.
+- `UserModule::request_read_access_for` / `request_write_access_for` через `Sandbox::grant_path_access` могут выдать доступ к пути за пределами CWD.
+- `AgentLoop::session_dir` делает `settings.cwd.join(log_folder)`; если `log-folder` абсолютный или содержит `..`, каталог логов может выйти за пределы CWD.
+
+## Как должно:
+
+- Корневой CWD является единой границей всех файловых операций и запуска команд агентского цикла.
+- Все относительные пути, переданные моделью в fs-инструменты, разрешаются относительно CWD; `../` за пределы CWD отклоняется.
+- Абсолютный путь внутри CWD допускается (с учётом allow-list/denylist), абсолютный путь вне CWD отклоняется.
+- Все конфигурационные списки путей `tools.fs` разрешаются относительно CWD, и их конфликты (`conf::fs_scope`) проверяются в тех же координатах.
+- Запросы на предоставление доступа и на выполнение shell-команд не могут выйти за пределы CWD.
+- Каталог сессии (`log-folder`) гарантированно находится внутри CWD.
+
+## Что необходимо исправить:
+
+1. **Ввести корневой CWD в sandbox**
+   - В `crates/tools/src/fs/access.rs` добавить в `Sandbox` канонический корневой путь (например, `root: PathBuf`).
+   - Изменить `Sandbox::from_fs` (или добавить новый конструктор) так, чтобы он принимал корневой CWD и разрешал записи `available-dirs`, `available-files`, `deprecated-dirs`, `deprecated-files` относительно этого корня.
+   - Изменить `abspath` или ввести внутреннюю функцию `resolve_in_root`, которая:
+     - для относительного пути делает `root.join(path)` и нормализует `.`/`..`;
+     - после нормализации проверяет, что итоговый путь начинается с `root` (по компонентам пути, с учётом регистра на Windows);
+     - для абсолютного пути проверяет, что он уже внутри `root`.
+   - Использовать `resolve_in_root` в `check_access`, `is_deprecated`, `grant_path_access`, `is_allowed` и во всех местах, где путь модели или конфигурации превращается в абсолютный.
+
+2. **Продублировать границы в fs-инструментах**
+   - `FsModule::build` должен принимать корневой CWD и передавать его в `Sandbox`.
+   - `ToolRegistry::build` должен передавать `ctx.cwd` в `FsModule::build`.
+   - Убедиться, что все операции `FsModule` (read/write/create/remove/move/list/search/list_available_*) проходят через root-aware sandbox.
+
+3. **Закрыть user-инструменты**
+   - В `crates/tools/src/user.rs`:
+     - `request_command_shell_execution` перед запуском проверяет, что `cwd` находится внутри CWD (через sandbox/root), и отклоняет запрос иначе;
+     - `request_read_access_for` / `request_write_access_for` используют root-aware `grant_path_access` и не выдают доступ за пределы CWD.
+
+4. **Обезопасить каталог сессии**
+   - В `crates/harness/src/agent_loop.rs::session_dir` вычислять `log_dir` через безопасную нормализацию `settings.cwd.join(log_folder)` и проверять, что итоговый путь внутри `settings.cwd`.
+   - Если `log-folder` абсолютный или с `..` выводит за пределы CWD, возвращать ошибку запуска.
+
+5. **Согласовать конфликт-проверку конфигурации**
+   - В `crates/conf/src/fs_scope.rs` и `crates/conf/src/load.rs` (передача CWD в `load_fs`/`check_conflicts`) перевести сравнение `tools.fs` путей на корневой CWD, чтобы конфликты allow-list/denylist вычислялись относительно той же директории, которую использует sandbox.
+   - CWD, передаваемый в sandbox и в `check_conflicts`, должен быть приведён к абсолютному и нормализованному виду; если на входе он ещё не нормализован, нормализовать его перед сравнением.
+
+6. **Git-инструменты**
+   - `GitModule` уже запускает git в `settings.cwd`, а целевые пути проверяет через sandbox. Убедиться, что после изменений sandbox пути patch-целей не могут выйти за CWD; отдельной правки git не требуется, если sandbox корректен.
+
+## Проверка корректности исправления:
+
+- `cargo check --workspace` и `cargo test --workspace` без ошибок.
+- Юнит-тесты для root-aware `Sandbox`:
+  - относительный путь внутри CWD разрешается корректно;
+  - `../` внутри CWD, не выходящий за корень, работает;
+  - `../` за пределы CWD отклоняется;
+  - абсолютный путь внутри CWD допускается, вне CWD — отклоняется;
+  - `deprecated-dirs` / `available-dirs` с относительными путями трактуются относительно CWD.
+- Ручные проверки:
+  - через fs-инструмент невозможно прочитать/записать файл за пределами CWD, даже используя `../../../`;
+  - `request_command_shell_execution` с `cwd` вне CWD отклоняется;
+  - `log-folder` вида `../outside` не создаёт каталог вне CWD, а запуск завершается с ошибкой;
+  - конфликт `available-dirs` / `deprecated-dirs` определяется корректно при CWD, отличном от process cwd.
+
+## Scope
+
+- `crates/tools/src/fs/access.rs`
+- `crates/tools/src/fs.rs`
+- `crates/tools/src/user.rs`
+- `crates/tools/src/lib.rs`
+- `crates/harness/src/agent_loop.rs`
+- `crates/conf/src/load.rs`
+- `crates/conf/src/fs_scope.rs`
