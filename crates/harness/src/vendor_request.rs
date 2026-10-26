@@ -316,7 +316,7 @@ fn format_waiting_time(secs: u64) -> String {
 /// shorter lines are padded with spaces up to the previous visible length.
 fn waiting_update(secs: u64, first: bool, previous_len: usize) -> (String, usize) {
     let text = format!("response waiting time: {}", format_waiting_time(secs));
-    let prefix = if first { "\n" } else { "\r" };
+    let prefix = if first { "\n\n" } else { "\r" };
     let padding = " ".repeat(previous_len.saturating_sub(text.len()));
     let line = format!("{prefix}{text}{padding}");
     (line, previous_len.max(text.len()))
