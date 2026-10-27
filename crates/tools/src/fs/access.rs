@@ -13,6 +13,8 @@ use std::path::{Component, Path, PathBuf};
 /// Allow-lists for directories, exact files and extensions.
 #[derive(Debug, Clone, Default)]
 pub struct Sandbox {
+    /// Root CWD; every path accepted by this sandbox must stay inside it.
+    root: PathBuf,
     r_dirs: Vec<String>,
     w_dirs: Vec<String>,
     r_files: Vec<String>,
@@ -25,6 +27,7 @@ pub struct Sandbox {
 impl Sandbox {
     /// Build from `tools.fs` entries. Unknown / unprefixed items are skipped.
     pub fn from_fs(
+        root: PathBuf,
         available_dirs: &[String],
         available_files: &[String],
         extensions: &[String],
@@ -32,10 +35,14 @@ impl Sandbox {
         deprecated_files: &[String],
     ) -> Self {
         let mut sb = Self {
+            root: normalize_root(&root),
             extensions: extensions.to_vec(),
             deprecated_dirs: deprecated_dirs.to_vec(),
             deprecated_files: deprecated_files.to_vec(),
-            ..Self::default()
+            r_dirs: Vec::new(),
+            w_dirs: Vec::new(),
+            r_files: Vec::new(),
+            w_files: Vec::new(),
         };
         split_prefixed(available_dirs, &mut sb.r_dirs, &mut sb.w_dirs);
         split_prefixed(available_files, &mut sb.r_files, &mut sb.w_files);
@@ -44,7 +51,31 @@ impl Sandbox {
 
     /// Empty allow-list (no `fs` module in conf).
     pub fn empty() -> Self {
-        Self::default()
+        Self::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Empty allow-list rooted at `root`.
+    pub fn new(root: PathBuf) -> Self {
+        Self {
+            root: normalize_root(&root),
+            r_dirs: Vec::new(),
+            w_dirs: Vec::new(),
+            r_files: Vec::new(),
+            w_files: Vec::new(),
+            extensions: Vec::new(),
+            deprecated_dirs: Vec::new(),
+            deprecated_files: Vec::new(),
+        }
+    }
+
+    /// Root CWD used by this sandbox.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Resolve `path` against the sandbox root and reject paths outside it.
+    pub fn resolve_in_root(&self, path: &str) -> Result<PathBuf, String> {
+        resolve_in_root(&self.root, path)
     }
 
     /// Read-directory allow-list as stored (including `w` dirs).
@@ -74,7 +105,8 @@ impl Sandbox {
 
     /// Check directory/file access for `r` or `w`.
     pub fn check_access(&self, path: &str, mode: char) -> Result<(), String> {
-        if self.is_deprecated(path) {
+        let abs_path = self.resolve_in_root(path)?;
+        if self.is_deprecated_abs(&abs_path) {
             return Err(format!(
                 "{mode}-access denied to {path} → path is deprecated (excluded by 'deprecated-dirs'/'deprecated-files' in tools.fs; do not use it)"
             ));
@@ -84,7 +116,7 @@ impl Sandbox {
         } else {
             (&self.r_dirs, &self.r_files)
         };
-        if self.is_allowed(path, dirs, files) {
+        if self.is_allowed_abs(&abs_path, dirs, files) {
             Ok(())
         } else {
             Err(format!(
@@ -122,12 +154,13 @@ impl Sandbox {
     /// `w` also adds the path to the matching `r` list.
     /// Deprecated paths are refused and not added to the allow-list.
     pub fn grant_path_access(&mut self, path: &str, mode: char) -> Result<(), String> {
-        if self.is_deprecated(path) {
+        let abs_path = self.resolve_in_root(path)?;
+        if self.is_deprecated_abs(&abs_path) {
             return Err(format!(
                 "{mode}-access denied to '{path}': path is deprecated"
             ));
         }
-        let is_dir = Path::new(path).is_dir();
+        let is_dir = abs_path.is_dir();
         let r_list = if is_dir {
             &mut self.r_dirs
         } else {
@@ -151,26 +184,44 @@ impl Sandbox {
 
     /// `true` when `path` is a deprecated file or lies inside a deprecated directory.
     pub fn is_deprecated(&self, path: &str) -> bool {
-        let path_parts = comparable_parts(&abspath(path));
-        if self
-            .deprecated_files
-            .iter()
-            .any(|f| comparable_parts(&abspath(f)) == path_parts)
-        {
+        self.resolve_in_root(path)
+            .map(|abs_path| self.is_deprecated_abs(&abs_path))
+            .unwrap_or(false)
+    }
+
+    fn is_deprecated_abs(&self, path: &Path) -> bool {
+        let path_parts = comparable_parts(path);
+        if self.deprecated_files.iter().any(|f| {
+            self.resolve_in_root(f)
+                .map(|abs_f| comparable_parts(&abs_f) == path_parts)
+                .unwrap_or(false)
+        }) {
             return true;
         }
         self.deprecated_dirs.iter().any(|d| {
-            let dir_parts = comparable_parts(&abspath(d));
-            !dir_parts.is_empty() && path_parts.starts_with(&dir_parts)
+            self.resolve_in_root(d)
+                .map(|abs_d| {
+                    let dir_parts = comparable_parts(&abs_d);
+                    !dir_parts.is_empty() && path_parts.starts_with(&dir_parts)
+                })
+                .unwrap_or(false)
         })
     }
 
-    fn is_allowed(&self, path: &str, dirs: &[String], files: &[String]) -> bool {
-        let abs_p = abspath(path);
-        let abs_p_s = path_to_string(&abs_p);
-        dirs.iter()
-            .any(|d| abs_p_s.starts_with(&path_to_string(&abspath(d))))
-            || files.iter().any(|f| abs_p_s == path_to_string(&abspath(f)))
+    fn is_allowed_abs(&self, path: &Path, dirs: &[String], files: &[String]) -> bool {
+        let path_parts = comparable_parts(path);
+        dirs.iter().any(|d| {
+            self.resolve_in_root(d)
+                .map(|abs_d| {
+                    let dir_parts = comparable_parts(&abs_d);
+                    !dir_parts.is_empty() && path_parts.starts_with(&dir_parts)
+                })
+                .unwrap_or(false)
+        }) || files.iter().any(|f| {
+            self.resolve_in_root(f)
+                .map(|abs_f| comparable_parts(&abs_f) == path_parts)
+                .unwrap_or(false)
+        })
     }
 }
 
@@ -195,12 +246,56 @@ pub fn abspath(path: &str) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     };
+    normalize_lexical(&joined)
+}
+
+/// Resolve `path` against `root`: relative paths are joined with `root`,
+/// absolute paths are kept, then `.` / `..` are normalized. The result must
+/// stay inside `root` by path components (case-insensitive on Windows).
+pub fn resolve_in_root(root: &Path, path: &str) -> Result<PathBuf, String> {
+    let root = normalize_root(root);
+    let candidate = Path::new(path);
+    let joined = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root.join(candidate)
+    };
+    let normalized = normalize_lexical(&joined);
+    if path_starts_with(&normalized, &root) {
+        Ok(normalized)
+    } else {
+        Err(format!(
+            "path '{path}' is outside root cwd '{}'",
+            root.display()
+        ))
+    }
+}
+
+/// Make `root` absolute (relative to process cwd) and normalize it lexically.
+fn normalize_root(root: &Path) -> PathBuf {
+    let joined = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(root)
+    };
+    normalize_lexical(&joined)
+}
+
+/// Normalize `.` and `..` lexically without touching the filesystem.
+///
+/// A `..` above the filesystem root is ignored, so the normalized path stays
+/// absolute and can be checked safely with [`path_starts_with`].
+fn normalize_lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
-    for c in joined.components() {
-        match c {
+    for component in path.components() {
+        match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                out.pop();
+                if out.file_name().is_some() {
+                    out.pop();
+                }
             }
             other => out.push(other.as_os_str()),
         }
@@ -208,8 +303,11 @@ pub fn abspath(path: &str) -> PathBuf {
     out
 }
 
-fn path_to_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+/// Component-prefix check; Windows paths are compared case-insensitively.
+fn path_starts_with(path: &Path, root: &Path) -> bool {
+    let path_parts = comparable_parts(path);
+    let root_parts = comparable_parts(root);
+    path_parts.starts_with(&root_parts)
 }
 
 fn comparable_parts(path: &Path) -> Vec<String> {
@@ -223,4 +321,72 @@ fn comparable_parts(path: &Path) -> Vec<String> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_root() -> PathBuf {
+        std::env::current_dir().unwrap().join("test-root")
+    }
+
+    #[test]
+    fn relative_path_inside_root_resolves() {
+        let root = test_root();
+        let sandbox = Sandbox::new(root.clone());
+        assert_eq!(
+            sandbox.resolve_in_root("sub/file.txt").unwrap(),
+            root.join("sub").join("file.txt")
+        );
+    }
+
+    #[test]
+    fn parent_inside_root_is_normalized() {
+        let root = test_root();
+        let sandbox = Sandbox::new(root.clone());
+        assert_eq!(
+            sandbox.resolve_in_root("sub/../file.txt").unwrap(),
+            root.join("file.txt")
+        );
+    }
+
+    #[test]
+    fn parent_outside_root_is_rejected() {
+        let sandbox = Sandbox::new(test_root());
+        assert!(sandbox.resolve_in_root("../outside.txt").is_err());
+    }
+
+    #[test]
+    fn absolute_paths_are_checked_against_root() {
+        let root = test_root();
+        let sandbox = Sandbox::new(root.clone());
+
+        let inside = root.join("inside.txt");
+        assert_eq!(
+            sandbox.resolve_in_root(&inside.to_string_lossy()).unwrap(),
+            inside
+        );
+
+        let outside = root.parent().unwrap().join("outside.txt");
+        assert!(sandbox.resolve_in_root(&outside.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn config_lists_are_relative_to_root() {
+        let root = test_root();
+        let available_dirs = vec!["w:src".to_string()];
+        let deprecated_dirs = vec!["target".to_string()];
+        let sandbox = Sandbox::from_fs(
+            root.clone(),
+            &available_dirs,
+            &[],
+            &[],
+            &deprecated_dirs,
+            &[],
+        );
+
+        assert!(sandbox.check_access("src/main.rs", 'w').is_ok());
+        assert!(sandbox.check_access("target/main.rs", 'w').is_err());
+    }
 }

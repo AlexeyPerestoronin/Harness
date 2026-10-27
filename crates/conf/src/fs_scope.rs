@@ -1,6 +1,6 @@
 //! Lexical comparison of `tools.fs` allow-list and denylist paths.
 //!
-//! Paths are resolved against the process cwd without touching the filesystem.
+//! Paths are resolved against the root CWD without touching the filesystem.
 //! `r:` / `w:` prefixes are stripped from allow-list entries. Separators `\` and
 //! `/` are equal; a trailing separator is ignored because comparison is by path
 //! components (`crates/conf` is not an ancestor of `crates/conf2`). On Windows
@@ -20,6 +20,7 @@ struct ResolvedPath {
 
 /// Report every allow-list / denylist overlap in one error.
 pub(crate) fn check_conflicts(
+    cwd: &Path,
     available_dirs: &[String],
     available_files: &[String],
     deprecated_dirs: &[String],
@@ -27,19 +28,19 @@ pub(crate) fn check_conflicts(
 ) -> Result<(), ConfError> {
     let a_dirs: Vec<_> = available_dirs
         .iter()
-        .map(|e| resolve_available(e))
+        .map(|e| resolve_available(e, cwd))
         .collect();
     let a_files: Vec<_> = available_files
         .iter()
-        .map(|e| resolve_available(e))
+        .map(|e| resolve_available(e, cwd))
         .collect();
     let d_dirs: Vec<_> = deprecated_dirs
         .iter()
-        .map(|e| resolve_deprecated(e))
+        .map(|e| resolve_deprecated(e, cwd))
         .collect();
     let d_files: Vec<_> = deprecated_files
         .iter()
-        .map(|e| resolve_deprecated(e))
+        .map(|e| resolve_deprecated(e, cwd))
         .collect();
 
     let mut lines = Vec::new();
@@ -123,16 +124,16 @@ fn conflict_line(
     )
 }
 
-fn resolve_available(entry: &str) -> ResolvedPath {
-    resolve_raw(entry, strip_rw_prefix(entry))
+fn resolve_available(entry: &str, cwd: &Path) -> ResolvedPath {
+    resolve_raw(entry, strip_rw_prefix(entry), cwd)
 }
 
-fn resolve_deprecated(entry: &str) -> ResolvedPath {
-    resolve_raw(entry, entry)
+fn resolve_deprecated(entry: &str, cwd: &Path) -> ResolvedPath {
+    resolve_raw(entry, entry, cwd)
 }
 
-fn resolve_raw(original: &str, path: &str) -> ResolvedPath {
-    let abs = lexical_abspath(path);
+fn resolve_raw(original: &str, path: &str, cwd: &Path) -> ResolvedPath {
+    let abs = lexical_abspath(cwd, path);
     let resolved = abs.to_string_lossy().replace('\\', "/");
     let parts = comparable_parts(&abs);
     ResolvedPath {
@@ -149,11 +150,21 @@ fn strip_rw_prefix(entry: &str) -> &str {
         .unwrap_or(entry)
 }
 
-/// Join with process cwd and normalize `.` / `..` without touching the filesystem.
+/// Join with the root CWD and normalize `.` / `..` without touching the filesystem.
 /// `\` and `/` are treated as the same separator.
-fn lexical_abspath(path: &str) -> PathBuf {
+fn lexical_abspath(cwd: &Path, path: &str) -> PathBuf {
+    let cwd = normalize_abs(cwd);
     let normalized = path.replace('\\', "/");
     let path = Path::new(&normalized);
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    normalize_lexical(&joined)
+}
+
+fn normalize_abs(path: &Path) -> PathBuf {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -161,12 +172,18 @@ fn lexical_abspath(path: &str) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     };
+    normalize_lexical(&joined)
+}
+
+fn normalize_lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
-    for c in joined.components() {
+    for c in path.components() {
         match c {
             Component::CurDir => {}
             Component::ParentDir => {
-                out.pop();
+                if out.file_name().is_some() {
+                    out.pop();
+                }
             }
             other => out.push(other.as_os_str()),
         }

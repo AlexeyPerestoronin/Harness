@@ -137,7 +137,7 @@ impl ToolRegistry {
         let _ = std::fs::create_dir_all(&ctx.temp_dir);
 
         let mut modules = Vec::new();
-        let (fs_module, sandbox) = FsModule::build(settings.fs.as_ref());
+        let (fs_module, sandbox) = FsModule::build(settings.fs.as_ref(), &ctx.cwd);
         if let Some(m) = fs_module {
             modules.push(Module::Fs(m));
         }

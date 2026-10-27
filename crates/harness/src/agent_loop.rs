@@ -212,7 +212,9 @@ pub fn session_dir(settings: &Settings) -> Result<PathBuf, String> {
         "{}_{}_{}",
         stamp, settings.agent.vendor, settings.agent.name
     );
-    let dir = settings.cwd.join(&settings.log_folder).join(folder);
+    let log_root = tools::fs::resolve_in_root(&settings.cwd, &settings.log_folder)
+        .map_err(|e| format!("invalid log-folder '{}': {e}", settings.log_folder))?;
+    let dir = log_root.join(folder);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create log dir: {e}"))?;
     Ok(dir)
 }

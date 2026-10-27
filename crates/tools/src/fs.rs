@@ -6,7 +6,7 @@
 //! an existing file.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
@@ -16,7 +16,7 @@ use crate::{arg_str, CallKind, CallResult, ToolDescriptor};
 mod access;
 mod search;
 
-pub use access::{abspath, Sandbox};
+pub use access::{abspath, resolve_in_root, Sandbox};
 
 /// Filesystem tools bound to the allow-list this module owns.
 pub struct FsModule {
@@ -33,10 +33,14 @@ impl FsModule {
     ///
     /// When `settings` is `None` there is no module and the allow-list is empty
     /// (still shared with `git` / `user`).
-    pub fn build(settings: Option<&conf::FsSettings>) -> (Option<Self>, Arc<Mutex<Sandbox>>) {
+    pub fn build(
+        settings: Option<&conf::FsSettings>,
+        cwd: &Path,
+    ) -> (Option<Self>, Arc<Mutex<Sandbox>>) {
         match settings {
             Some(fs) => {
                 let module = Self::new(Arc::new(Mutex::new(Sandbox::from_fs(
+                    cwd.to_path_buf(),
                     &fs.available_dirs,
                     &fs.available_files,
                     &fs.available_file_extensions,
@@ -46,7 +50,7 @@ impl FsModule {
                 let sandbox = module.sandbox.clone();
                 (Some(module), sandbox)
             }
-            None => (None, Arc::new(Mutex::new(Sandbox::empty()))),
+            None => (None, Arc::new(Mutex::new(Sandbox::new(cwd.to_path_buf())))),
         }
     }
 
@@ -142,20 +146,21 @@ impl FsModule {
     }
 
     fn read_file(&self, path: &str) -> Result<String, String> {
-        self.guard(path, 'r', true)
-            .and_then(|_| fs::read_to_string(path).map_err(|e| e.to_string()))
-            .map_err(|e| format!("cannot read file '{path}' → {e}"))
+        let abs_path = self
+            .guard(path, 'r', true)
+            .map_err(|e| format!("cannot read file '{path}' → {e}"))?;
+        fs::read_to_string(&abs_path).map_err(|e| format!("cannot read file '{path}' → {e}"))
     }
 
     fn write_file(&self, path: &str, content: &str) -> Result<String, String> {
         (|| {
-            self.guard(path, 'w', true)?;
-            if let Some(parent) = Path::new(path).parent() {
+            let abs_path = self.guard(path, 'w', true)?;
+            if let Some(parent) = abs_path.parent() {
                 if !parent.as_os_str().is_empty() {
                     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
             }
-            fs::write(path, content).map_err(|e| e.to_string())?;
+            fs::write(&abs_path, content).map_err(|e| e.to_string())?;
             Ok(format!("success: wrote {path}"))
         })()
         .map_err(|e: String| format!("cannot write file '{path}' → {e}"))
@@ -163,8 +168,8 @@ impl FsModule {
 
     fn create_file(&self, path: &str) -> Result<String, String> {
         (|| {
-            self.guard(path, 'w', true)?;
-            fs::write(path, "").map_err(|e| e.to_string())?;
+            let abs_path = self.guard(path, 'w', true)?;
+            fs::write(&abs_path, "").map_err(|e| e.to_string())?;
             Ok(format!("success: created {path}"))
         })()
         .map_err(|e: String| format!("cannot create file '{path}' → {e}"))
@@ -172,8 +177,8 @@ impl FsModule {
 
     fn remove_file(&self, path: &str) -> Result<String, String> {
         (|| {
-            self.guard(path, 'w', false)?;
-            fs::remove_file(path).map_err(|e| e.to_string())?;
+            let abs_path = self.guard(path, 'w', false)?;
+            fs::remove_file(&abs_path).map_err(|e| e.to_string())?;
             Ok(format!("success: removed {path}"))
         })()
         .map_err(|e: String| format!("cannot remove file '{path}' → {e}"))
@@ -181,9 +186,9 @@ impl FsModule {
 
     fn move_file(&self, src: &str, dst: &str) -> Result<String, String> {
         (|| {
-            self.guard(src, 'w', true)?;
-            self.guard(dst, 'w', true)?;
-            fs::rename(src, dst).map_err(|e| e.to_string())?;
+            let src_abs = self.guard(src, 'w', true)?;
+            let dst_abs = self.guard(dst, 'w', true)?;
+            fs::rename(&src_abs, &dst_abs).map_err(|e| e.to_string())?;
             Ok(format!("success: moved {src} to {dst}"))
         })()
         .map_err(|e: String| format!("cannot move file '{src}' to {dst} → {e}"))
@@ -193,16 +198,18 @@ impl FsModule {
         (|| {
             let depth: i32 = depth.parse().map_err(|e| format!("{e}"))?;
             let sb = self.sandbox.lock().map_err(|e| e.to_string())?;
+            let abs_path = sb.resolve_in_root(path)?;
             sb.check_access(path, 'r')?;
-            Ok(walk_folder(path, depth, &sb).join("\n"))
+            let abs_path_s = abs_path.to_string_lossy().into_owned();
+            Ok(walk_folder(&abs_path_s, depth, &sb).join("\n"))
         })()
         .map_err(|e: String| format!("cannot list folder '{path}' → {e}"))
     }
 
     fn create_folder(&self, path: &str) -> Result<String, String> {
         (|| {
-            self.guard(path, 'w', false)?;
-            fs::create_dir_all(path).map_err(|e| e.to_string())?;
+            let abs_path = self.guard(path, 'w', false)?;
+            fs::create_dir_all(&abs_path).map_err(|e| e.to_string())?;
             Ok(format!("success: created {path}"))
         })()
         .map_err(|e: String| format!("cannot create folder '{path}' → {e}"))
@@ -210,8 +217,8 @@ impl FsModule {
 
     fn remove_folder(&self, path: &str) -> Result<String, String> {
         (|| {
-            self.guard(path, 'w', false)?;
-            fs::remove_dir_all(path).map_err(|e| e.to_string())?;
+            let abs_path = self.guard(path, 'w', false)?;
+            fs::remove_dir_all(&abs_path).map_err(|e| e.to_string())?;
             Ok(format!("success: removed {path}"))
         })()
         .map_err(|e: String| format!("cannot remove folder '{path}' → {e}"))
@@ -219,21 +226,21 @@ impl FsModule {
 
     fn move_folder(&self, src: &str, dst: &str) -> Result<String, String> {
         (|| {
-            self.guard(src, 'w', false)?;
-            self.guard(dst, 'w', false)?;
-            fs::rename(src, dst).map_err(|e| e.to_string())?;
+            let src_abs = self.guard(src, 'w', false)?;
+            let dst_abs = self.guard(dst, 'w', false)?;
+            fs::rename(&src_abs, &dst_abs).map_err(|e| e.to_string())?;
             Ok(format!("success: moved {src} to {dst}"))
         })()
         .map_err(|e: String| format!("cannot move folder '{src}' to '{dst}' → {e}"))
     }
 
-    fn guard(&self, path: &str, mode: char, check_ext: bool) -> Result<(), String> {
+    fn guard(&self, path: &str, mode: char, check_ext: bool) -> Result<PathBuf, String> {
         let sb = self.sandbox.lock().map_err(|e| e.to_string())?;
         sb.check_access(path, mode)?;
         if check_ext {
             sb.check_extensions(path, mode)?;
         }
-        Ok(())
+        sb.resolve_in_root(path)
     }
 
     fn list_extensions(&self) -> Result<String, String> {

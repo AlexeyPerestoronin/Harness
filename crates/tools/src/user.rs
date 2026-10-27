@@ -5,7 +5,6 @@
 //! once on approval and does not add it to the terminal whitelist.
 
 use std::io::{self, Write};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
@@ -85,6 +84,10 @@ impl UserModule {
 
     fn request_read_access_for(&self, reason: &str, path: &str) -> Result<String, String> {
         (|| {
+            self.sandbox
+                .lock()
+                .map_err(|e| e.to_string())?
+                .resolve_in_root(path)?;
             if let Some(denial) = deprecated_grant_denial(&self.sandbox, path, 'r')? {
                 return Ok(denial);
             }
@@ -106,6 +109,10 @@ impl UserModule {
 
     fn request_write_access_for(&self, reason: &str, path: &str) -> Result<String, String> {
         (|| {
+            self.sandbox
+                .lock()
+                .map_err(|e| e.to_string())?
+                .resolve_in_root(path)?;
             if let Some(denial) = deprecated_grant_denial(&self.sandbox, path, 'w')? {
                 return Ok(denial);
             }
@@ -132,6 +139,11 @@ impl UserModule {
         cwd: &str,
     ) -> Result<String, String> {
         (|| {
+            let run_cwd = self
+                .sandbox
+                .lock()
+                .map_err(|e| e.to_string())?
+                .resolve_in_root(cwd)?;
             match request_permission(&format!(
                 "Запрос исполнения команды\nКоманда: {command}\nКаталог: {cwd}\nПричина: {reason}\nРазрешить? [y/n]"
             ))? {
@@ -139,7 +151,7 @@ impl UserModule {
                     let timeout = self.command_timeout.ok_or_else(|| {
                         "command-execution-limit is not configured (enable tools.terminal)".to_string()
                     })?;
-                    run_observed_command(command, Path::new(cwd), timeout)
+                    run_observed_command(command, &run_cwd, timeout)
                 }
                 Some(denial) => Ok(format!("command execution denied: {denial}")),
             }

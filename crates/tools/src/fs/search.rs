@@ -147,22 +147,21 @@ fn scan_files(
 }
 
 fn iter_files_for_search(sandbox: &Arc<Mutex<Sandbox>>, root: &str) -> Result<Vec<String>, String> {
-    {
+    let abs_root = {
         let sb = sandbox.lock().map_err(|e| e.to_string())?;
+        let abs_root = sb.resolve_in_root(root)?;
         sb.check_access(root, 'r')?;
-    }
-    if Path::new(root).is_file() {
-        {
-            let sb = sandbox.lock().map_err(|e| e.to_string())?;
+        if abs_root.is_file() {
             sb.check_extensions(root, 'r')?;
+            return Ok(vec![abs_root.to_string_lossy().into_owned()]);
         }
-        return Ok(vec![root.to_string()]);
-    }
-    if !Path::new(root).is_dir() {
-        return Err(format!("root '{root}' is not a file or directory"));
-    }
+        if !abs_root.is_dir() {
+            return Err(format!("root '{root}' is not a file or directory"));
+        }
+        abs_root
+    };
     let mut out = Vec::new();
-    collect_files(Path::new(root), sandbox, &mut out)?;
+    collect_files(&abs_root, sandbox, &mut out)?;
     Ok(out)
 }
 

@@ -96,7 +96,7 @@ where
         let agent = load_agent(agent_obj, conf_dir, &mut chooser)?;
 
         let tools = match obj.get(keys::TOOLS) {
-            Some(v) => load_tools(expect_object(v, keys::TOOLS)?, conf_dir)?,
+            Some(v) => load_tools(expect_object(v, keys::TOOLS)?, conf_dir, &cwd)?,
             None => ToolsSettings::default(),
         };
         (cwd, log_folder, agent, tools)
@@ -374,12 +374,13 @@ fn resolve_api_key(model_obj: &serde_json::Map<String, Value>) -> Result<String,
 fn load_tools(
     obj: &serde_json::Map<String, Value>,
     conf_dir: &Path,
+    cwd: &Path,
 ) -> Result<ToolsSettings, ConfError> {
     let mut settings = ToolsSettings::default();
     for (name, value) in obj {
         let module = expect_object(value, name)?;
         if name == keys::TOOL_FS {
-            settings.fs = Some(load_fs(module)?);
+            settings.fs = Some(load_fs(module, cwd)?);
         } else if name == keys::TOOL_GIT {
             settings.git = Some(load_git(module)?);
         } else if name == keys::TOOL_TERMINAL {
@@ -397,7 +398,7 @@ fn load_tools(
     Ok(settings)
 }
 
-fn load_fs(obj: &serde_json::Map<String, Value>) -> Result<FsSettings, ConfError> {
+fn load_fs(obj: &serde_json::Map<String, Value>, cwd: &Path) -> Result<FsSettings, ConfError> {
     if obj.contains_key(keys::EXTRA_SCOPE) {
         return Err(ConfError::new(format!(
             "'{}' was renamed to '{}'",
@@ -411,6 +412,7 @@ fn load_fs(obj: &serde_json::Map<String, Value>) -> Result<FsSettings, ConfError
     let deprecated_dirs = required_deprecated_list(obj, keys::DEPRECATED_DIRS)?;
     let deprecated_files = required_deprecated_list(obj, keys::DEPRECATED_FILES)?;
     crate::fs_scope::check_conflicts(
+        cwd,
         &available_dirs,
         &available_files,
         &deprecated_dirs,
