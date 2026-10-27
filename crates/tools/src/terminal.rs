@@ -1,8 +1,9 @@
-//! Terminal tool set (`tools.terminal`): `run_shell`, `run_invoke`, and shell allow-list.
+//! Terminal tool set (`tools.terminal`): whitelisted `run_shell`.
 //!
-//! `run_shell` requires the command in `available-commands` and cwd in `cwd-list`.
-//! `run_invoke` does not use the whitelist; it launches `{cwd}/.venv/.../python -m invoke`.
-//! `list_available_shell_commands` reports `available-commands`.
+//! `run_shell` runs a command from `available-commands` in a directory that
+//! must be inside both the root CWD (`settings.cwd`) and one of the
+//! `cwd-list` entries. `cwd-list` entries are resolved against the root CWD,
+//! not the process cwd.
 
 use std::path::{Path, PathBuf};
 
@@ -12,57 +13,49 @@ use crate::fs::abspath;
 use crate::process::run_observed_command;
 use crate::{arg_str, arg_str_or_empty, CallResult, ToolDescriptor};
 
-/// Shell / invoke tools.
+/// Shell tools bound to the terminal allow-lists.
 pub struct TerminalModule {
+    /// Root workspace directory from `settings.cwd`.
     cwd: PathBuf,
+    /// Directories from which `run_shell` may execute.
     cwd_list: Vec<String>,
+    /// Command names allowed for `run_shell`.
     available_commands: Vec<String>,
+    /// Timeout for each `run_shell` subprocess, seconds.
     command_execution_limit: u64,
-    invoke_execution_limit: u64,
 }
 
 impl TerminalModule {
-    /// Construct from conf values.
+    /// Construct from typed `tools.terminal` values.
     pub fn new(
         cwd: PathBuf,
         cwd_list: Vec<String>,
         available_commands: Vec<String>,
         command_execution_limit: u64,
-        invoke_execution_limit: u64,
     ) -> Self {
         Self {
             cwd,
             cwd_list,
             available_commands,
             command_execution_limit,
-            invoke_execution_limit,
         }
     }
 
-    /// Command names allowed for `run_shell`.
-    pub fn available_commands(&self) -> &[String] {
-        &self.available_commands
-    }
-
-    /// JSON Schema descriptors for the terminal tools.
-    pub fn descriptors() -> Vec<ToolDescriptor> {
-        vec![
-            desc(
-                "run_shell",
-                "Run a command.",
-                json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]}),
+    /// JSON Schema descriptor for `run_shell`.
+    ///
+    /// The description is built from the actual module settings so the model
+    /// always sees the concrete `available-commands` and `cwd-list` values.
+    pub fn descriptors(&self) -> Vec<ToolDescriptor> {
+        vec![desc(
+            "run_shell",
+            &format!(
+                "Run a command. available-commands: {:?}. cwd-list: {:?}. cwd must be inside the root CWD '{}' and inside one of the cwd-list entries (subdirectories are allowed).",
+                self.available_commands,
+                self.cwd_list,
+                path_string(&self.root_cwd())
             ),
-            desc(
-                "run_invoke",
-                "Run an invoke command.",
-                json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}),
-            ),
-            desc(
-                "list_available_shell_commands",
-                "List of available shell commands.",
-                json!({}),
-            ),
-        ]
+            json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]}),
+        )]
     }
 
     /// Dispatch a named terminal tool.
@@ -73,13 +66,6 @@ impl TerminalModule {
                 &arg_str(args, "command")?,
                 &arg_str_or_empty(args, "arguments"),
             )?)),
-            "run_invoke" => Ok(CallResult::plain(
-                self.run_invoke(&arg_str(args, "command")?)?,
-            )),
-            "list_available_shell_commands" => Ok(CallResult::plain(format!(
-                "available: {:?}",
-                self.available_commands()
-            ))),
             _ => Err(format!("tool '{name}' not available")),
         }
     }
@@ -91,42 +77,57 @@ impl TerminalModule {
                 self.available_commands
             ));
         }
-        if !cwd_allowed(cwd, &self.cwd_list) {
-            return Err(format!(
-                "'{cwd}'-cwd is denied for '{command}'-command (allowed cwd for '{command}'-command is {:?})",
-                self.cwd_list
-            ));
-        }
+        let run_cwd = self.validated_cwd(cwd, command)?;
         let cmd = format!("{command} {arguments}");
-        run_observed_command(&cmd, Path::new(cwd), self.command_execution_limit)
+        run_observed_command(&cmd, &run_cwd, self.command_execution_limit)
     }
 
-    fn run_invoke(&self, command: &str) -> Result<String, String> {
-        let python = invoke_python(&self.cwd);
-        let cmd = format!("{} -m invoke {command}", python.display());
-        run_observed_command(&cmd, &self.cwd, self.invoke_execution_limit)
+    /// Validate `cwd` and return its normalized absolute path.
+    ///
+    /// The path is resolved against the root CWD when relative, normalized
+    /// (`.`, `..`), and then checked to stay inside both the root CWD and at
+    /// least one `cwd-list` entry.
+    fn validated_cwd(&self, cwd: &str, command: &str) -> Result<PathBuf, String> {
+        let root = self.root_cwd();
+        let requested = resolve_from(&root, cwd);
+        let denied = |reason: &str| {
+            format!(
+                "'{cwd}'-cwd is denied for '{command}'-command: {reason} (requested cwd: '{cwd}', available cwd-list: {:?}, root cwd: '{}')",
+                self.cwd_list,
+                path_string(&root)
+            )
+        };
+        if !requested.starts_with(&root) {
+            return Err(denied("it is outside the root cwd"));
+        }
+        let in_list = self
+            .cwd_list
+            .iter()
+            .any(|entry| requested.starts_with(&resolve_from(&root, entry)));
+        if !in_list {
+            return Err(denied("it is outside every cwd-list entry"));
+        }
+        Ok(requested)
+    }
+
+    fn root_cwd(&self) -> PathBuf {
+        abspath(&path_string(&self.cwd))
     }
 }
 
-fn cwd_allowed(cwd: &str, list: &[String]) -> bool {
-    let abs = path_string(&abspath(cwd));
-    list.iter()
-        .any(|allowed| abs.starts_with(&path_string(&abspath(allowed))))
+/// Resolve `path` as an absolute normalized path: relative paths are joined
+/// with `root`, absolute paths are kept, then `.` / `..` are normalized.
+fn resolve_from(root: &Path, path: &str) -> PathBuf {
+    let candidate = Path::new(path);
+    if candidate.is_absolute() {
+        abspath(path)
+    } else {
+        abspath(&path_string(&root.join(candidate)))
+    }
 }
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
-}
-
-fn invoke_python(cwd: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        cwd.join(".venv").join("Scripts").join("python.exe")
-    }
-    #[cfg(not(windows))]
-    {
-        cwd.join(".venv").join("bin").join("python")
-    }
 }
 
 fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
@@ -134,5 +135,94 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
         name: name.to_string(),
         description: description.to_string(),
         parameters,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn module(root: &Path, cwd_list: &[&str]) -> TerminalModule {
+        TerminalModule::new(
+            root.to_path_buf(),
+            cwd_list.iter().map(|s| s.to_string()).collect(),
+            vec!["cargo".to_string(), "git".to_string()],
+            1,
+        )
+    }
+
+    fn root() -> PathBuf {
+        std::env::temp_dir().join("terminal-root-for-tests")
+    }
+
+    #[test]
+    fn accepts_cwd_inside_root_and_list() {
+        let root = root();
+        let m = module(&root, &[root.to_str().unwrap()]);
+        let result = m.validated_cwd(root.to_str().unwrap(), "cargo");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn accepts_relative_cwd_inside_root_and_list() {
+        let root = root();
+        let m = module(&root, &["."]);
+        let result = m.validated_cwd("sub/dir", "cargo");
+        assert!(result.is_ok());
+        let expected = resolve_from(&root, "sub/dir");
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn rejects_cwd_with_parent_escaping_root() {
+        let root = root();
+        let m = module(&root, &["."]);
+        let result = m.validated_cwd("../outside", "cargo");
+        let err = result.unwrap_err();
+        assert!(err.contains("../outside"));
+        assert!(err.contains("outside the root cwd"));
+    }
+
+    #[test]
+    fn rejects_cwd_inside_root_but_outside_cwd_list() {
+        let root = root();
+        let allowed = root.join("allowed");
+        let m = module(&root, &[allowed.to_str().unwrap()]);
+        let other = root.join("other");
+        let result = m.validated_cwd(other.to_str().unwrap(), "cargo");
+        let err = result.unwrap_err();
+        assert!(err.contains("outside every cwd-list entry"));
+    }
+
+    #[test]
+    fn resolves_cwd_list_entries_against_root_cwd() {
+        let root = root();
+        let m = module(&root, &["allowed"]);
+        let result = m.validated_cwd("allowed/sub", "cargo");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn descriptors_contain_actual_lists_and_root_cwd() {
+        let root = root();
+        let m = module(&root, &["allowed"]);
+        let descriptors = m.descriptors();
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].name, "run_shell");
+        assert!(descriptors[0].description.contains("\"cargo\", \"git\""));
+        assert!(descriptors[0].description.contains("\"allowed\""));
+        assert!(descriptors[0]
+            .description
+            .contains(&path_string(&resolve_from(&root, "."))));
+    }
+
+    #[test]
+    fn run_shell_rejects_unavailable_command() {
+        let root = root();
+        let m = module(&root, &["."]);
+        let err = m
+            .run_shell(root.to_str().unwrap(), "unknown", "")
+            .unwrap_err();
+        assert!(err.contains("'unknown'-command is not available"));
     }
 }

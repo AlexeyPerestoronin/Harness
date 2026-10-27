@@ -382,7 +382,6 @@ fn load_terminal(obj: &serde_json::Map<String, Value>) -> Result<TerminalSetting
         cwd_list: optional_string_list(obj, keys::CWD_LIST)?,
         available_commands: optional_string_list(obj, keys::AVAILABLE_COMMANDS)?,
         command_execution_limit: required_u64(obj, keys::COMMAND_EXECUTION_LIMIT)?,
-        invoke_execution_limit: required_u64(obj, keys::INVOKE_EXECUTION_LIMIT)?,
     })
 }
 
@@ -801,5 +800,23 @@ fn strict_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Number(n) => n.as_f64(),
         _ => None,
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn terminal_loads_without_deprecated_timeout() {
+        let obj = json!({
+            "cwd-list": ["."],
+            "available-commands": ["cargo"],
+            "command-execution-limit": 120
+        });
+        let settings = load_terminal(obj.as_object().unwrap()).unwrap();
+        assert_eq!(settings.cwd_list, vec!["."]);
+        assert_eq!(settings.available_commands, vec!["cargo"]);
+        assert_eq!(settings.command_execution_limit, 120);
     }
 }

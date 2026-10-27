@@ -2,7 +2,7 @@
     // Edit only this section.
     // Named values here are substituted into the rest of this file.
     "vars": {
-        // Agent workspace (tools, logs, invoke). Absolute path, or relative to the process cwd.
+        // Agent workspace (tools and logs). Absolute path, or relative to the process cwd.
         "workspace": "<workspace path>",
         // Path to an agent file or to a folder with agent files (you will be asked to choose).
         // Relative paths are resolved against the directory of this conf file.
@@ -25,11 +25,9 @@
         // Timeout in seconds for git subprocesses. Number, not a string.
         "execution-limit": 120,
         // Timeout in seconds for run_shell. Number, not a string.
-        "command-execution-limit": 120,
-        // Timeout in seconds for run_invoke. Number, not a string.
-        "invoke-execution-limit": 120
+        "command-execution-limit": 120
     },
-    // Workspace of the agent (tools, logs, invoke). Must be set explicitly.
+    // Workspace of the agent (tools and logs). Must be set explicitly.
     "cwd": "${vars:workspace}",
     // Model file, confirmation mode, session limits and log folder.
     "agent": {
@@ -87,21 +85,21 @@
             // Timeout in seconds for git subprocesses.
             "execution-limit": ${vars:execution-limit}
         },
-        // Shell tools: run_shell, run_invoke, list_available_shell_commands.
+        // Shell tools: run_shell.
         "terminal": {
             // Allowed cwd values for run_shell (abspath prefix match), separate from `available-dirs`.
+            // Relative entries are resolved against settings.cwd, not the process cwd.
             "cwd-list": [
                 "${vars:work-dir}"
             ],
-            // Command names without r:/w: prefixes. run_invoke does not use this list.
+            // Command names without r:/w: prefixes.
             "available-commands": [
                 "findstr",
-                "cargo"
+                "cargo",
+                "git",
             ],
             // Timeout in seconds for run_shell. Required if `terminal` is enabled.
-            "command-execution-limit": ${vars:command-execution-limit},
-            // Timeout in seconds for run_invoke. Required if `terminal` is enabled.
-            "invoke-execution-limit": ${vars:invoke-execution-limit}
+            "command-execution-limit": ${vars:command-execution-limit}
         },
         // User interaction: ask_user, request_*_access_for, request_command_shell_execution.
         "user": {},

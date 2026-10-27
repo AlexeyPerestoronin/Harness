@@ -114,19 +114,20 @@ Tools:
 terminal
 ========
 
-Purpose: run a whitelisted shell command, run invoke, list allowed commands.
+Purpose: run a whitelisted shell command.
 
 Configuration (`tools.terminal`):
 
   cwd-list — array of strings, optional, default []
     Allowed cwd values for run_shell. Match by absolute-path prefix.
-    Separate from available-dirs.
+    Subdirectories of an entry are allowed. Relative entries are resolved
+    against settings.cwd, not the process cwd. The requested cwd must also
+    stay inside settings.cwd after normalizing `.` and `..`.
 
       "cwd-list": ["C:/work"]
 
   available-commands — array of strings, optional, default []
     Allowed command names for run_shell. No `r:` / `w:` prefixes.
-    run_invoke does not use this list.
 
       "available-commands": ["cargo", "findstr"]
 
@@ -136,26 +137,14 @@ Configuration (`tools.terminal`):
 
       "command-execution-limit": 120
 
-  invoke-execution-limit — number (seconds), required, no default
-    Timeout for run_invoke.
-
-      "invoke-execution-limit": 120
-
 Tools:
   run_shell                        Run a command from the whitelist.
-  run_invoke                       Run an invoke command (no whitelist).
-  list_available_shell_commands    List available-commands.
 
-run_shell vs run_invoke vs request_command_shell_execution:
+run_shell vs request_command_shell_execution:
 
   run_shell
-    Command must be in available-commands. Cwd must match cwd-list.
-    Timeout is command-execution-limit.
-
-  run_invoke
-    No whitelist. Runs {settings.cwd}/.venv/Scripts/python.exe -m invoke
-    (Unix: .venv/bin/python) with the given task name.
-    Timeout is invoke-execution-limit.
+    Command must be in available-commands. Cwd must be inside settings.cwd
+    and inside a cwd-list entry. Timeout is command-execution-limit.
 
   request_command_shell_execution
     Lives in the user module. Asks the human once; on approval runs the

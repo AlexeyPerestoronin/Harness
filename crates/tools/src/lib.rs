@@ -96,7 +96,7 @@ impl Module {
         match self {
             Module::Fs(_) => FsModule::descriptors(),
             Module::Git(_) => GitModule::descriptors(),
-            Module::Terminal(_) => TerminalModule::descriptors(),
+            Module::Terminal(m) => m.descriptors(),
             Module::User(_) => UserModule::descriptors(),
             Module::Skills(m) => m.descriptors(),
             Module::Roles(m) => m.descriptors(),
@@ -160,7 +160,6 @@ impl ToolRegistry {
                 term.cwd_list.clone(),
                 term.available_commands.clone(),
                 term.command_execution_limit,
-                term.invoke_execution_limit,
             )));
         }
         if settings.user.is_some() {

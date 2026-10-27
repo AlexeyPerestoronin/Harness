@@ -8,7 +8,7 @@
 // Root object of harness.json5
 // ---------------------------------------------------------------------------
 
-/// Workspace of the agent (tools, logs, invoke). Required.
+/// Workspace of the agent (tools and logs). Required.
 pub const CWD: &str = "cwd";
 /// Object with model / mode / session limits and log-folder.
 pub const AGENT: &str = "agent";
@@ -80,7 +80,7 @@ pub const ITERATIONS: &str = "iterations";
 pub const TOOL_FS: &str = "fs";
 /// Git tools module.
 pub const TOOL_GIT: &str = "git";
-/// Shell / invoke tools module.
+/// Shell tools module.
 pub const TOOL_TERMINAL: &str = "terminal";
 /// User-interaction tools module.
 pub const TOOL_USER: &str = "user";
@@ -125,8 +125,6 @@ pub const CWD_LIST: &str = "cwd-list";
 pub const AVAILABLE_COMMANDS: &str = "available-commands";
 /// Timeout in seconds for `run_shell`. Required if `terminal` is enabled.
 pub const COMMAND_EXECUTION_LIMIT: &str = "command-execution-limit";
-/// Timeout in seconds for `run_invoke`. Required if `terminal` is enabled.
-pub const INVOKE_EXECUTION_LIMIT: &str = "invoke-execution-limit";
 
 // ---------------------------------------------------------------------------
 // tools.skills / tools.roles entries

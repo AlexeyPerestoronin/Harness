@@ -41,7 +41,7 @@ harness.exe --conf-new "<path to new conf file>"
 
 ### Файл цикла `harness.json5`
 
-- `cwd` — workspace агента (tools, logs, invoke).
+- `cwd` — workspace агента (инструменты и логи).
 - `agent.log-folder` — папка логов относительно `cwd`.
 - `agent`:
   - `config` — путь к файлу модели или к папке с такими файлами (будет предложено выбрать). Относительные пути резолвятся от директории этого conf-файла.
@@ -71,7 +71,7 @@ harness.exe --conf-new "<path to new conf file>"
 
 - **fs** — файлы и папки; `find_str` / `find_str_by_regex`; `find_file_by_str` / `find_files_by_regex`; `list_available_*` для dirs/files/extensions. Поля: `available-dirs`, `available-file-extensions`, `available-files` (префиксы `r:` / `w:` у allow-list директорий и файлов), `deprecated-dirs`, `deprecated-files`.
 - **git** — `executable`, `execution-limit`.
-- **terminal** — `run_shell`, `run_invoke`, `list_available_shell_commands`; поля `cwd-list`, `available-commands`, таймауты `command-execution-limit` и `invoke-execution-limit`.
+- **terminal** — `run_shell`; поля `cwd-list`, `available-commands`, таймаут `command-execution-limit`.
 - **user** — `ask_user`, `request_read_access_for`, `request_write_access_for`, `request_command_shell_execution`.
 - **skills** / **roles** — агент может запросить skill или role по имени (`get_skill_explanation` / `get_role_explanation`).
 

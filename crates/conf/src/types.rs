@@ -157,7 +157,7 @@ fn same_price(left: f64, right: f64) -> bool {
 /// Fully resolved harness configuration.
 #[derive(Debug, Clone)]
 pub struct Settings {
-    /// Agent workspace (`cwd` in json5). Tools, logs and invoke run from here.
+    /// Agent workspace (`cwd` in json5). Tools and logs run from here.
     pub cwd: PathBuf,
     /// Directory of the loaded `--conf` file (model path is resolved against it).
     pub conf_dir: PathBuf,
@@ -214,7 +214,7 @@ pub struct ToolsSettings {
     pub fs: Option<FsSettings>,
     /// Git tools.
     pub git: Option<GitSettings>,
-    /// Shell / invoke tools.
+    /// Shell tools.
     pub terminal: Option<TerminalSettings>,
     /// User-interaction tools.
     pub user: Option<UserSettings>,
@@ -257,8 +257,6 @@ pub struct TerminalSettings {
     pub available_commands: Vec<String>,
     /// Timeout for `run_shell` in seconds.
     pub command_execution_limit: u64,
-    /// Timeout for `run_invoke` in seconds.
-    pub invoke_execution_limit: u64,
 }
 
 /// Settings for the `user` module. The module has no fields.

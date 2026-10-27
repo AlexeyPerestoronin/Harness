@@ -41,7 +41,7 @@ Rules:
 
 ### Loop file `harness.json5`
 
-- `cwd` — agent workspace (tools, logs, invoke).
+- `cwd` — agent workspace (tools and logs).
 - `agent.log-folder` — log folder relative to `cwd`.
 - `agent`:
   - `config` — path to a model file or a folder of model files (you will be asked to choose). Relative paths are resolved against the directory of this conf file.
@@ -71,7 +71,7 @@ A missing key in `tools` means the module is not registered. An unknown key is a
 
 - **fs** — files and folders; `find_str` / `find_str_by_regex`; `find_file_by_str` / `find_files_by_regex`; `list_available_*` for dirs, files and extensions. Fields: `available-dirs`, `available-file-extensions`, `available-files` (`r:` / `w:` prefixes on the dir and file allow-lists), `deprecated-dirs`, `deprecated-files`.
 - **git** — `executable`, `execution-limit`.
-- **terminal** — `run_shell`, `run_invoke`, `list_available_shell_commands`; fields `cwd-list`, `available-commands`, timeouts `command-execution-limit` and `invoke-execution-limit`.
+- **terminal** — `run_shell`; fields `cwd-list`, `available-commands`, timeout `command-execution-limit`.
 - **user** — `ask_user`, `request_read_access_for`, `request_write_access_for`, `request_command_shell_execution`.
 - **skills** / **roles** — the agent can request a skill or role by name (`get_skill_explanation` / `get_role_explanation`).
 
