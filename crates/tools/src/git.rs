@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,6 +17,48 @@ use crate::{arg_str, CallKind, CallResult, ToolDescriptor};
 
 static PATCH_SEQ: AtomicU64 = AtomicU64::new(1);
 
+// Help text appended to the first `apply_diff_patch` error of a session.
+const PATCH_FORMAT_HELP: &str = r#"A `*.patch` must be a valid unified diff / git-style patch:
+
+- It must contain `---` / `+++` and/or `diff --git` headers with `a/...` and `b/...` paths.
+- Each changed file must have a hunk header: `@@ -<start>,<count> +<start>,<count> @@`.
+- Change lines must be prefixed with `+` (added), `-` (removed) or one space (context).
+- Do not put any explanatory text around the patch.
+- A single-file patch is the minimal valid case.
+
+Example 1 (`---`/`+++`):
+--- a/README.md
++++ b/README.md
+@@ -1,1 +1,1 @@
+-old line
++new line
+
+Example 2 (`diff --git`):
+diff --git a/src/main.rs b/src/main.rs
+index 1111111..2222222 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,3 @@
+ fn main() {
+-    println!("hi");
++    println!("hello");
+ }
+
+Example 3 (two files):
+diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-a
++A
+diff --git a/b.txt b/b.txt
+--- a/b.txt
++++ b/b.txt
+@@ -1 +1 @@
+-b
++B
+"#;
+
 /// Git tools bound to the fs allow-list and a configured executable.
 pub struct GitModule {
     sandbox: Arc<Mutex<Sandbox>>,
@@ -24,6 +66,8 @@ pub struct GitModule {
     execution_limit: u64,
     cwd: PathBuf,
     temp_dir: PathBuf,
+    /// Set after the first `apply_diff_patch` error of this session.
+    help_shown: AtomicBool,
 }
 
 impl GitModule {
@@ -41,6 +85,7 @@ impl GitModule {
             execution_limit,
             cwd,
             temp_dir,
+            help_shown: AtomicBool::new(false),
         }
     }
 
@@ -173,7 +218,15 @@ impl GitModule {
                 tmp_s,
             ))
         })()
-        .map_err(|e: String| format!("cannot apply diff patch → {e}"))
+        .map_err(|e| self.format_apply_error(e))
+    }
+
+    fn format_apply_error(&self, reason: String) -> String {
+        if self.help_shown.swap(true, Ordering::Relaxed) {
+            format!("cannot apply diff patch → {reason}")
+        } else {
+            format!("cannot apply diff patch → {reason}\n\n{PATCH_FORMAT_HELP}")
+        }
     }
 
     fn check(&self, path: &str, mode: char) -> Result<(), String> {
@@ -309,5 +362,42 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
         name: name.to_string(),
         description: description.to_string(),
         parameters,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GitModule, PATCH_FORMAT_HELP};
+    use crate::fs::Sandbox;
+    use std::sync::{Arc, Mutex};
+
+    fn test_module() -> GitModule {
+        GitModule::new(
+            Arc::new(Mutex::new(Sandbox::empty())),
+            "git".to_string(),
+            30,
+            std::env::temp_dir(),
+            std::env::temp_dir(),
+        )
+    }
+
+    #[test]
+    fn first_apply_error_includes_help() {
+        let module = test_module();
+        let err = module.apply_diff_patch("   ").unwrap_err();
+        assert!(err.starts_with("cannot apply diff patch → invalid or empty patch format\n\n"));
+        assert!(err.contains(PATCH_FORMAT_HELP), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn second_apply_error_omits_help() {
+        let module = test_module();
+        let _ = module.apply_diff_patch("   ").unwrap_err();
+        let err = module.apply_diff_patch("   ").unwrap_err();
+        assert!(!err.contains(PATCH_FORMAT_HELP), "unexpected error: {err}");
+        assert_eq!(
+            err,
+            "cannot apply diff patch → invalid or empty patch format"
+        );
     }
 }
