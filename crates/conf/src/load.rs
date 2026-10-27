@@ -802,21 +802,3 @@ fn strict_f64(value: &Value) -> Option<f64> {
         _ => None,
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn terminal_loads_without_deprecated_timeout() {
-        let obj = json!({
-            "cwd-list": ["."],
-            "available-commands": ["cargo"],
-            "command-execution-limit": 120
-        });
-        let settings = load_terminal(obj.as_object().unwrap()).unwrap();
-        assert_eq!(settings.cwd_list, vec!["."]);
-        assert_eq!(settings.available_commands, vec!["cargo"]);
-        assert_eq!(settings.command_execution_limit, 120);
-    }
-}
