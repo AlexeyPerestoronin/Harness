@@ -4,9 +4,9 @@ USAGE:
     harness.exe --help
     harness.exe --help-tools
     harness.exe --version
-    harness.exe [--conf <path>] --prompt "<user prompt>"
-    harness.exe [--conf <path>] --prompt-file <path to prompt file>
-    harness.exe --dump "<path to dump file>"
+    harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt "<user prompt>"
+    harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt-file <path to prompt file>
+    harness.exe [--cwd <path>] [--api-key <key>] --dump "<path to dump file>"
     harness.exe --conf-new "<path to new conf file>"
 
 FLAGS:
@@ -37,6 +37,20 @@ FLAGS:
         history; --prompt is not used.
         Configuration is taken from the dump file; --conf cannot be used
         with --dump.
+
+    --cwd <path>
+        Workspace root override. Overrides 'cwd' from harness.json5 (or dump).
+        A relative path is resolved against the directory of the working conf file:
+        parent(--conf) for a new session, the directory of the dump settings for --dump.
+        The final value is absolute and normalized.
+        Can only be used with --prompt, --prompt-file or --dump.
+
+    --api-key <key>
+        API-key override. A literal key or a path to a UTF-8 file whose trimmed
+        contents are the key. A relative file path is resolved against the final cwd.
+        Overrides any api-key from the model file. If no key is configured and this
+        flag is absent, harness asks for the key in the console.
+        Can only be used with --prompt, --prompt-file or --dump.
 
     --conf-new "<path to new conf file>"
         Write a full commented JSON5 template to the path and exit.

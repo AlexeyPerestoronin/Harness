@@ -23,7 +23,7 @@ use serde_json::Value;
 /// If `agent.config` is a directory this fails with
 /// `agent was not selected`. Use [`load_with`] to choose a candidate.
 pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
-    load_with(conf_path, |_| Err("agent was not selected".into()))
+    load_with(conf_path, None, |_| Err("agent was not selected".into()))
 }
 
 /// Load and validate a harness configuration file.
@@ -32,7 +32,12 @@ pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
 /// When it is a **directory**, `chooser` receives the sorted candidate list
 /// and must return a 0-based index. Session limits (`mode`, `token-limit`,
 /// `iteration-limit`, `USD-limit`) always come from `harness.json5`.
-pub fn load_with<F>(conf_path: &Path, chooser: F) -> Result<Settings, ConfError>
+/// `cwd_override` replaces `cwd` from the file (used by `--cwd`).
+pub fn load_with<F>(
+    conf_path: &Path,
+    cwd_override: Option<PathBuf>,
+    chooser: F,
+) -> Result<Settings, ConfError>
 where
     F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
 {
@@ -55,17 +60,19 @@ where
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    load_from_value(root, &conf_dir, chooser)
+    load_from_value(root, &conf_dir, cwd_override, chooser)
 }
 
 /// Validate a conf JSON object (already after vars substitution) into [`Settings`].
 ///
 /// `vars` is not substituted again. `conf_dir` resolves a relative `agent.config`.
+/// `cwd_override` replaces `cwd` from `root`; relative paths use `conf_dir`.
 /// After a successful load, [`Settings::source`] is `root` with `agent.config`
 /// rewritten to the absolute chosen agent file.
 pub fn load_from_value<F>(
     mut root: Value,
     conf_dir: &Path,
+    cwd_override: Option<PathBuf>,
     mut chooser: F,
 ) -> Result<Settings, ConfError>
 where
@@ -73,13 +80,13 @@ where
 {
     let (cwd, log_folder, agent, tools) = {
         let obj = expect_object(&root, "settings")?;
-        let cwd = required_string(obj, keys::CWD)?;
-        if cwd.trim().is_empty() {
-            return Err(ConfError::new(format!(
-                "'{}' must be set explicitly",
-                keys::CWD
-            )));
-        }
+        let cwd = match cwd_override {
+            Some(raw) => resolve_cwd_path(&raw, conf_dir)?,
+            None => {
+                let raw = required_string(obj, keys::CWD)?;
+                resolve_cwd(&raw, conf_dir)?
+            }
+        };
 
         let agent_raw = obj
             .get(keys::AGENT)
@@ -98,13 +105,73 @@ where
     rewrite_agent_config(&mut root, &agent.config_path);
 
     Ok(Settings {
-        cwd: PathBuf::from(cwd),
+        cwd,
         conf_dir: conf_dir.to_path_buf(),
         log_folder,
         agent,
         tools,
         source: root,
     })
+}
+
+fn resolve_cwd(raw: &str, conf_dir: &Path) -> Result<PathBuf, ConfError> {
+    if raw.trim().is_empty() {
+        return Err(ConfError::new(format!(
+            "'{}' must be set explicitly",
+            keys::CWD
+        )));
+    }
+    resolve_cwd_path(Path::new(raw), conf_dir)
+}
+
+fn resolve_cwd_path(raw: &Path, conf_dir: &Path) -> Result<PathBuf, ConfError> {
+    if raw.as_os_str().is_empty() {
+        return Err(ConfError::new(format!(
+            "'{}' must be set explicitly",
+            keys::CWD
+        )));
+    }
+    let base = if conf_dir.is_absolute() {
+        conf_dir.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(conf_dir)
+    };
+    let absolute = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        base.join(raw)
+    };
+    normalize_abs(&absolute)
+}
+
+fn normalize_abs(path: &Path) -> Result<PathBuf, ConfError> {
+    use std::path::Component;
+
+    if !path.is_absolute() {
+        return Err(ConfError::new(format!(
+            "'{}' must be an absolute path",
+            keys::CWD
+        )));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(name) => normalized.push(name),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(ConfError::new(format!(
+            "'{}' must be set explicitly",
+            keys::CWD
+        )));
+    }
+    Ok(normalized)
 }
 
 fn rewrite_agent_config(root: &mut Value, config_path: &Path) {
@@ -283,10 +350,7 @@ fn resolve_api_key(model_obj: &serde_json::Map<String, Value>) -> Result<String,
     };
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(ConfError::new(format!(
-            "please set '{}' in the model file",
-            keys::API_KEY
-        )));
+        return Ok(String::new());
     }
     let candidate = PathBuf::from(trimmed);
     let path = if candidate.is_absolute() {
@@ -800,5 +864,57 @@ fn strict_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Number(n) => n.as_f64(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model_obj_with(key: &str, value: Value) -> serde_json::Map<String, Value> {
+        let mut obj = serde_json::Map::new();
+        obj.insert(key.to_string(), value);
+        obj
+    }
+
+    #[test]
+    fn resolve_api_key_allows_empty_and_whitespace() {
+        assert_eq!(
+            resolve_api_key(&model_obj_with(keys::API_KEY, Value::String(String::new()))).unwrap(),
+            ""
+        );
+        assert_eq!(
+            resolve_api_key(&model_obj_with(
+                keys::API_KEY,
+                Value::String("   ".to_string())
+            ))
+            .unwrap(),
+            ""
+        );
+    }
+
+    #[test]
+    fn resolve_api_key_requires_key() {
+        assert!(resolve_api_key(&serde_json::Map::new()).is_err());
+    }
+
+    #[test]
+    fn relative_cwd_resolves_against_conf_dir() {
+        let conf_dir = std::env::current_dir().unwrap().join("proj").join("conf");
+        assert_eq!(resolve_cwd(".", &conf_dir).unwrap(), conf_dir);
+        assert_eq!(
+            resolve_cwd("..", &conf_dir).unwrap(),
+            conf_dir.parent().unwrap().to_path_buf()
+        );
+    }
+
+    #[test]
+    fn absolute_cwd_is_normalized() {
+        let conf_dir = std::env::current_dir().unwrap();
+        let raw = conf_dir.join("a").join("..").join("b");
+        assert_eq!(
+            resolve_cwd(&raw.to_string_lossy(), &conf_dir).unwrap(),
+            conf_dir.join("b")
+        );
     }
 }

@@ -37,6 +37,10 @@ pub enum CliAction {
         prompt_file: Option<PathBuf>,
         /// Dump file to resume from.
         dump: Option<PathBuf>,
+        /// Workspace override. Resolved against the working conf file directory.
+        cwd: Option<PathBuf>,
+        /// API-key override: a literal key or a path to a UTF-8 key file.
+        api_key: Option<String>,
     },
 }
 
@@ -50,6 +54,8 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut help = false;
     let mut help_tools = false;
     let mut version = false;
+    let mut cwd: Option<PathBuf> = None;
+    let mut api_key: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -89,9 +95,31 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
             conf_new = Some(PathBuf::from(value));
             continue;
         }
+        if let Some(value) = take_value(args, &mut i, "--cwd")? {
+            if value.is_empty() {
+                return Err("--cwd requires a value".to_string());
+            }
+            cwd = Some(PathBuf::from(value));
+            continue;
+        }
+        if let Some(value) = take_value(args, &mut i, "--api-key")? {
+            if value.is_empty() {
+                return Err("--api-key requires a non-empty value".to_string());
+            }
+            api_key = Some(value);
+            continue;
+        }
         return Err(format!("unknown argument: {a}"));
     }
 
+    if cwd.is_some() || api_key.is_some() {
+        if help || help_tools || version || conf_new.is_some() {
+            return Err(
+                "--cwd and --api-key can only be used with --prompt, --prompt-file or --dump"
+                    .to_string(),
+            );
+        }
+    }
     if help {
         return Ok(CliAction::Help);
     }
@@ -141,6 +169,8 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
         prompt,
         prompt_file,
         dump,
+        cwd,
+        api_key,
     })
 }
 
@@ -200,4 +230,58 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<Option<Strin
         return Ok(Some(rest.to_string()));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<CliAction, String> {
+        let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        parse_args(&owned)
+    }
+
+    #[test]
+    fn parses_cwd_space_and_equals() {
+        let CliAction::Start { cwd, .. } = parse(&["--prompt", "hi", "--cwd", "work"]).unwrap()
+        else {
+            panic!("expected Start");
+        };
+        assert_eq!(cwd, Some(PathBuf::from("work")));
+
+        let CliAction::Start { cwd, .. } = parse(&["--prompt", "hi", "--cwd=work"]).unwrap() else {
+            panic!("expected Start");
+        };
+        assert_eq!(cwd, Some(PathBuf::from("work")));
+    }
+
+    #[test]
+    fn parses_api_key_space_and_equals() {
+        let CliAction::Start { api_key, .. } =
+            parse(&["--prompt", "hi", "--api-key", "k"]).unwrap()
+        else {
+            panic!("expected Start");
+        };
+        assert_eq!(api_key, Some("k".to_string()));
+
+        let CliAction::Start { api_key, .. } = parse(&["--prompt", "hi", "--api-key=k"]).unwrap()
+        else {
+            panic!("expected Start");
+        };
+        assert_eq!(api_key, Some("k".to_string()));
+    }
+
+    #[test]
+    fn rejects_cwd_and_api_key_with_help_or_conf_new() {
+        assert!(parse(&["--help", "--cwd", "work"]).is_err());
+        assert!(parse(&["--version", "--api-key", "k"]).is_err());
+        assert!(parse(&["--conf-new", "out.json5", "--cwd", "work"]).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_or_missing_values() {
+        assert!(parse(&["--prompt", "hi", "--cwd="]).is_err());
+        assert!(parse(&["--prompt", "hi", "--api-key="]).is_err());
+        assert!(parse(&["--prompt", "hi", "--cwd"]).is_err());
+    }
 }
