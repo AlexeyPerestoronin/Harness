@@ -5,7 +5,9 @@
 //! model `rpm` / `tpm` / `rpd` windows allow another call (`-1` skips that
 //! check). Failed transport, HTTP 429 and HTTP 503 are retried up to 24 times;
 //! other HTTP errors are returned immediately. The crate stays on blocking
-//! `reqwest` — no async runtime and no extra retry middleware.
+//! `reqwest` — no async runtime and no extra retry middleware. The blocking
+//! client's 30-second default timeout is disabled so a thinking model can
+//! answer later; only interrupting the process stops the wait.
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -218,8 +220,7 @@ impl VendorRequest {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            // No response timeout: the model may keep thinking indefinitely.
-            client: Client::builder().build().expect("reqwest client"),
+            client: blocking_client(),
             limiter: RateLimit::new(rpm, tpm, rpd),
             logger,
             clock,
@@ -248,12 +249,12 @@ impl VendorRequest {
         let body = body.clone();
         self.execute(
             move || match json_post(&client, &url, &headers, &body).send() {
-                Err(e) => Err(e.to_string()),
+                Err(e) => Err(transport_error(&e)),
                 Ok(resp) => {
                     let status = resp.status().as_u16();
                     resp.text()
                         .map(|text| (status, text))
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| transport_error(&e))
                 }
             },
         )
@@ -305,6 +306,40 @@ impl VendorRequest {
         }
         Err(last_err)
     }
+}
+
+/// Blocking client that waits for the model with no deadline.
+///
+/// `reqwest::blocking::Client` defaults to 30 seconds for connect, read and
+/// write. Dropping the old 300-second `.timeout(...)` therefore restored that
+/// default: a thinking model that keeps the body open past 30 seconds fails
+/// with `error decoding response body` (or `error sending request` if headers
+/// have not arrived yet). `None` disables the deadline. Only interrupting the
+/// process stops the wait.
+fn blocking_client() -> Client {
+    Client::builder()
+        .timeout(None::<Duration>)
+        .build()
+        .expect("reqwest client")
+}
+
+/// Top-level reqwest text plus the source chain.
+///
+/// `Error`'s `Display` is only `error decoding response body` / `error sending
+/// request`. The useful cause (`operation timed out`, `connection refused`)
+/// sits in `source()`.
+fn transport_error(err: &reqwest::Error) -> String {
+    let mut message = err.to_string();
+    let mut source = std::error::Error::source(err);
+    while let Some(inner) = source {
+        let text = inner.to_string();
+        if !message.contains(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
+        source = inner.source();
+    }
+    message
 }
 
 /// Format a duration in whole seconds as `X min Y sec`.
@@ -377,4 +412,87 @@ fn json_post(
         builder = builder.header(k, v);
     }
     builder.json(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    /// Headers immediately, body after `delay` (thinking model keeps the body open).
+    fn slow_server(delay: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            sock.set_read_timeout(Some(Duration::from_secs(2))).ok();
+            let mut buf = [0u8; 8192];
+            let _ = sock.read(&mut buf);
+            let body = b"{\"ok\":true}";
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = sock.write_all(resp.as_bytes());
+            let _ = sock.flush();
+            thread::sleep(delay);
+            let _ = sock.write_all(body);
+            let _ = sock.flush();
+        });
+        format!("http://{addr}/")
+    }
+
+    #[test]
+    fn blocking_client_reads_response_past_default_timeout() {
+        let url = slow_server(Duration::from_secs(31));
+        let client = super::blocking_client();
+        let started = Instant::now();
+        let resp = client.post(&url).body("{}").send().unwrap_or_else(|e| {
+            panic!(
+                "send after {:?}: {}",
+                started.elapsed(),
+                super::transport_error(&e)
+            )
+        });
+        let text = resp.text().unwrap_or_else(|e| {
+            panic!(
+                "text after {:?}: {}",
+                started.elapsed(),
+                super::transport_error(&e)
+            )
+        });
+        assert_eq!(text, "{\"ok\":true}");
+        assert!(started.elapsed() >= Duration::from_secs(30));
+    }
+
+    #[test]
+    fn send_json_returns_immediate_body() {
+        let url = slow_server(Duration::ZERO);
+        let mut vendor =
+            super::VendorRequest::new(-1, -1, -1, std::sync::Arc::new(logger::NullLogger));
+        let text = vendor
+            .send_json(&url, &[], &serde_json::json!({"ping": true}))
+            .expect("fast 200");
+        assert_eq!(text, "{\"ok\":true}");
+    }
+
+    #[test]
+    fn blocking_client_reports_closed_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let client = super::blocking_client();
+        let err = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .expect_err("nothing is listening");
+        let err = super::transport_error(&err);
+        assert!(err.contains("error sending request"), "{err}");
+        assert!(
+            err.contains("os error") || err.contains("refused") || err.contains("timed out"),
+            "source chain must be visible, got {err}"
+        );
+    }
 }

@@ -1,0 +1,5 @@
+# Результат: error decoding response body
+
+- Было: `Client::builder().build()` без `.timeout(...)`. У `reqwest::blocking::Client` 0.12 дефолт — 30 секунд на connect/read/write (это не async-клиент, у которого дефолта нет). Снятие старого `CLIENT_TIMEOUT` (300 с) вернуло этот дефолт. Модель, которая уже отдала заголовки и держит тело открытым дольше 30 с, падала как `error decoding response body`; если заголовки ещё не пришли — как `error sending request`. `e.to_string()` прятал причину `operation timed out`.
+- Стало: `Client::builder().timeout(None)` — дедлайна нет, ожидание по-прежнему прерывается только остановкой процесса. В лог транспортной ошибки дописывается цепочка `source()` (`operation timed out`, `connection refused`, …). Регрессия: локальный сервер отдаёт заголовки сразу и тело через 31 с — `blocking_client()` читает тело; закрытый порт даёт транспортную ошибку, а не decode.
+- Почему: воспроизведено на reqwest 0.12.28 — дефолтный blocking-клиент обрывается ровно на 30.011 с с `operation timed out`. Документация blocking `ClientBuilder::timeout` прямо говорит: default 30 seconds, `None` отключает таймаут.
