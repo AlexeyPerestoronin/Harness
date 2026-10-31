@@ -280,7 +280,7 @@ impl VendorRequest {
             match run_attempt(&mut send_once, out) {
                 Err(e) => {
                     last_err = format!("⚠️ {attempt}-attempt request failed: {e}");
-                    self.logger.log_line(&last_err);
+                    self.logger.log_str(&last_err, true);
                 }
                 Ok((status, body)) => {
                     self.limiter.record_http(&*clock);

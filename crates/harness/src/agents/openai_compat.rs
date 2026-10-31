@@ -136,7 +136,7 @@ impl OpenAiCompatAgent {
     }
 
     fn handle_tool_calls(&mut self, calls: &[ChatToolCall]) {
-        self.logger.log_line("agent request tools:");
+        self.logger.log_str("agent request tools:", true);
         for (i, call) in calls.iter().enumerate() {
             let raw_args = if call.arguments.is_empty() {
                 "{}".to_string()
@@ -149,11 +149,11 @@ impl OpenAiCompatAgent {
                 raw_args.clone()
             };
             self.logger
-                .log_line(&format!("{}. {}({log_arg})", i + 1, call.name));
+                .log_str(&format!("{}. {}({log_arg})", i + 1, call.name), true);
             let args: Value = serde_json::from_str(&raw_args).unwrap_or_else(|_| json!({}));
             let result = invoke_tool(&self.tools, &self.logger, &call.name, args);
             if !result.starts_with("execution error:") {
-                self.logger.log_line("✅ success");
+                self.logger.log_str("✅ success", true);
             }
             self.messages.push(json!({
                 "role": "tool",
@@ -190,32 +190,32 @@ impl Agent for OpenAiCompatAgent {
     fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
             if !prompt.is_empty() {
-                self.logger.log_line("user prompt:");
-                self.logger.log_line("```");
-                self.logger.log_line(prompt);
-                self.logger.log_line("```");
+                self.logger.log_str("user prompt:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(prompt, true);
+                self.logger.log_str("```", true);
                 self.messages
                     .push(json!({"role": "user", "content": prompt}));
             }
         }
         let parsed = self.execute_request()?;
         if let Some(role) = &parsed.role {
-            self.logger.log_line(&format!("role: {role}"));
+            self.logger.log_str(&format!("role: {role}"), true);
         }
         if let Some(reasoning) = &parsed.reasoning {
             if !reasoning.is_empty() {
-                self.logger.log_line("request reasoning:");
-                self.logger.log_line("```");
-                self.logger.log_line(reasoning);
-                self.logger.log_line("```");
+                self.logger.log_str("request reasoning:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(reasoning, true);
+                self.logger.log_str("```", true);
             }
         }
         if let Some(content) = &parsed.content {
             if !content.is_empty() {
-                self.logger.log_line("agent content:");
-                self.logger.log_line("```");
-                self.logger.log_line(content);
-                self.logger.log_line("```");
+                self.logger.log_str("agent content:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(content, true);
+                self.logger.log_str("```", true);
             }
         }
         self.messages.push(parsed.message.clone());
@@ -229,30 +229,30 @@ impl Agent for OpenAiCompatAgent {
 
     fn finish(&self) {
         let total = self.usage.input_tokens + self.usage.output_tokens;
-        self.logger.log_line("Sessions statistic");
+        self.logger.log_str("Sessions statistic", true);
         self.logger
-            .log_line(&format!("- total requests: {}", self.usage.requests));
-        self.logger.log_line(&format!("- total tokens: {total}"));
-        self.logger.log_line(&format!(
+            .log_str(&format!("- total requests: {}", self.usage.requests), true);
+        self.logger.log_str(&format!("- total tokens: {total}"), true);
+        self.logger.log_str(&format!(
             "    → input tokens: {} (from stats)",
             self.usage.input_tokens
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "    ← output tokens: {}",
             self.usage.output_tokens
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "    ↔ cached tokens: {}",
             self.usage.cached_tokens
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "- USD approximated: {}",
             super::format_usd(self.usage.total_cost_usd)
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "- USD real: {}",
             format_real_cost(self.usage.real_cost_usd)
-        ));
+        ), true);
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {

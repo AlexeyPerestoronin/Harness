@@ -117,7 +117,7 @@ impl ClaudeAgent {
     }
 
     fn handle_tool_uses(&mut self, calls: &[ClaudeToolUse]) {
-        self.logger.log_line("agent request tools:");
+        self.logger.log_str("agent request tools:", true);
         let mut results = Vec::new();
         for (i, call) in calls.iter().enumerate() {
             let raw_args = call.input.to_string();
@@ -127,10 +127,10 @@ impl ClaudeAgent {
                 raw_args
             };
             self.logger
-                .log_line(&format!("{}. {}({log_arg})", i + 1, call.name));
+                .log_str(&format!("{}. {}({log_arg})", i + 1, call.name), true);
             let result = invoke_tool(&self.tools, &self.logger, &call.name, call.input.clone());
             if !result.starts_with("execution error:") {
-                self.logger.log_line("✅ success");
+                self.logger.log_str("✅ success", true);
             }
             results.push(json!({
                 "type": "tool_result",
@@ -171,10 +171,10 @@ impl Agent for ClaudeAgent {
     fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
             if !prompt.is_empty() {
-                self.logger.log_line("user prompt:");
-                self.logger.log_line("```");
-                self.logger.log_line(prompt);
-                self.logger.log_line("```");
+                self.logger.log_str("user prompt:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(prompt, true);
+                self.logger.log_str("```", true);
                 self.messages
                     .push(json!({"role": "user", "content": prompt}));
             }
@@ -182,10 +182,10 @@ impl Agent for ClaudeAgent {
         let parsed = self.execute_request()?;
         if let Some(content) = &parsed.text {
             if !content.is_empty() {
-                self.logger.log_line("agent content:");
-                self.logger.log_line("```");
-                self.logger.log_line(content);
-                self.logger.log_line("```");
+                self.logger.log_str("agent content:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(content, true);
+                self.logger.log_str("```", true);
             }
         }
         self.messages.push(json!({
@@ -202,30 +202,30 @@ impl Agent for ClaudeAgent {
 
     fn finish(&self) {
         let total = self.usage.input_tokens + self.usage.output_tokens;
-        self.logger.log_line("Sessions statistic");
+        self.logger.log_str("Sessions statistic", true);
         self.logger
-            .log_line(&format!("- total requests: {}", self.usage.requests));
-        self.logger.log_line(&format!("- total tokens: {total}"));
-        self.logger.log_line(&format!(
+            .log_str(&format!("- total requests: {}", self.usage.requests), true);
+        self.logger.log_str(&format!("- total tokens: {total}"), true);
+        self.logger.log_str(&format!(
             "    → input tokens: {} (from stats)",
             self.usage.input_tokens
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "    ← output tokens: {}",
             self.usage.output_tokens
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "    ↔ cached tokens: {}",
             self.usage.cached_tokens
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "- USD approximated: {}",
             super::format_usd(self.usage.total_cost_usd)
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "- USD real: {}",
             format_real_cost(self.usage.real_cost_usd)
-        ));
+        ), true);
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {

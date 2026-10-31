@@ -86,44 +86,53 @@ impl AgentLoop {
             self.agent.reload_session(src)?;
             prompt = None;
         }
-        self.logger.log_line("# Agent-loop session:");
-        self.logger.log_line(&format!(
-            "- agent: {} {}",
-            self.agent.vendor(),
-            self.agent.model()
-        ));
+        self.logger.log_str("# Agent-loop session:", true);
+        self.logger.log_str(
+            &format!(
+                "- agent: {} {}",
+                self.agent.vendor(),
+                self.agent.model()
+            ),
+            true,
+        );
         self.logger
-            .log_line(&format!("- agent config: {}", self.agent_config.display()));
+            .log_str(&format!("- agent config: {}", self.agent_config.display()), true);
         self.logger
-            .log_line(&format!("- iteration limit: {}", self.iteration_limit));
+            .log_str(&format!("- iteration limit: {}", self.iteration_limit), true);
         self.logger
-            .log_line(&format!("- tokens limit: {}", self.agent.tokens_limit()));
+            .log_str(&format!("- tokens limit: {}", self.agent.tokens_limit()), true);
         self.logger
-            .log_line(&format!("- usd limit: {}", self.agent.limit_usd()));
-        self.logger.log_line(&format!(
-            "- start time: {}",
-            Local::now().format("%Y-%m-%d %H:%M")
-        ));
+            .log_str(&format!("- usd limit: {}", self.agent.limit_usd()), true);
+        self.logger.log_str(
+            &format!(
+                "- start time: {}",
+                Local::now().format("%Y-%m-%d %H:%M")
+            ),
+            true,
+        );
         if let Some(src) = source_dump {
             self.logger
-                .log_line(&format!("- continue from dump: {}", src.display()));
-            self.logger.log_line("- settings: from dump");
+                .log_str(&format!("- continue from dump: {}", src.display()), true);
+            self.logger.log_str("- settings: from dump", true);
         }
-        self.logger.log_line("");
-        self.logger.log_line("# Iterations:");
+        self.logger.log_str("", true);
+        self.logger.log_str("# Iterations:", true);
 
         let start_time = Instant::now();
         loop {
             self.iteration += 1;
             let elapsed = start_time.elapsed().as_secs();
-            self.logger.log_line("");
-            self.logger.log_line(&iteration_header(
-                self.iteration,
-                elapsed,
-                self.agent.consumed_tokens(),
-                self.agent.consumed_usd(),
-                self.agent.consumed_usd_real(),
-            ));
+            self.logger.log_str("", true);
+            self.logger.log_str(
+                &iteration_header(
+                    self.iteration,
+                    elapsed,
+                    self.agent.consumed_tokens(),
+                    self.agent.consumed_usd(),
+                    self.agent.consumed_usd_real(),
+                ),
+                true,
+            );
 
             if !self.check_limit(
                 "tokens",
@@ -147,7 +156,7 @@ impl AgentLoop {
             self.agent.dump_session(dump_file)?;
             crate::dump_settings::embed(dump_file, &self.dump_settings)?;
             if stop {
-                self.logger.log_line("# Session results:");
+                self.logger.log_str("# Session results:", true);
                 self.agent.finish();
                 break;
             }
@@ -156,15 +165,15 @@ impl AgentLoop {
         let secs = start_time.elapsed().as_secs();
         let formatted = format!("{}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60);
         self.logger
-            .log_line(&format!("- Execution time: {formatted}"));
-        self.logger.log_line("");
+            .log_str(&format!("- Execution time: {formatted}"), true);
+        self.logger.log_str("", true);
         Ok(())
     }
 
     fn check_limit(&self, kind: &str, limit: f64, consumed: f64) -> bool {
         if (limit - -1.0).abs() > f64::EPSILON && consumed > limit {
             let message = format!("⚠️ {kind} limit exceed ({consumed} > {limit})");
-            self.logger.log_line(&message);
+            self.logger.log_str(&message, true);
             if self.safe_mode {
                 return confirm(&format!("{message} → resume execution? [y/N]: "));
             }

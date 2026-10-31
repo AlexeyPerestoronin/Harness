@@ -201,18 +201,18 @@ impl ToolRegistry {
             .ok_or_else(|| format!("tool '{name}' not available"))?;
         let result = module.call(name, &map)?;
         match &result.kind {
-            CallKind::Patch { tmp } => self.logger.log_line(&format!("Apply patch {tmp}")),
+            CallKind::Patch { tmp } => self.logger.log_str(&format!("Apply patch {tmp}"), true),
             CallKind::Read => self
                 .logger
-                .log_line(&format!("Read {}symbols", result.output.len())),
+                .log_str(&format!("Read {}symbols", result.output.len()), true),
             CallKind::Write => self
                 .logger
-                .log_line(&format!("Write {}symbols", result.output.len())),
+                .log_str(&format!("Write {}symbols", result.output.len()), true),
             CallKind::Normal => {
-                self.logger.log_line("Result:");
-                self.logger.log_line("```");
-                self.logger.log_line(&result.output);
-                self.logger.log_line("```");
+                self.logger.log_str("Result:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(&result.output, true);
+                self.logger.log_str("```", true);
             }
         }
         Ok(result.output)

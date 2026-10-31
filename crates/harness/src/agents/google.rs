@@ -118,7 +118,7 @@ impl GoogleAgent {
     }
 
     fn handle_tool_calls(&self, calls: &[GoogleFnCall]) -> Value {
-        self.logger.log_line("agent request tools:");
+        self.logger.log_str("agent request tools:", true);
         let mut parts = Vec::new();
         for (i, fc) in calls.iter().enumerate() {
             let log_arg = if fc.name == "write_file" {
@@ -127,7 +127,7 @@ impl GoogleAgent {
                 fc.args.to_string()
             };
             self.logger
-                .log_line(&format!("{}. {}({log_arg})", i + 1, fc.name));
+                .log_str(&format!("{}. {}({log_arg})", i + 1, fc.name), true);
             let result = invoke_tool(&self.tools, &self.logger, &fc.name, fc.args.clone());
             if result.starts_with("execution error:") {
                 self.logger.log_str(&format!(" → fail → {result}"), false);
@@ -137,9 +137,9 @@ impl GoogleAgent {
                     self.logger
                         .log_str(&format!(" → read/write {}symbols", result.len()), false);
                 } else {
-                    self.logger.log_line("```");
-                    self.logger.log_line(&result);
-                    self.logger.log_line("```");
+                    self.logger.log_str("```", true);
+                    self.logger.log_str(&result, true);
+                    self.logger.log_str("```", true);
                 }
             }
             parts.push(json!({
@@ -179,10 +179,10 @@ impl Agent for GoogleAgent {
     fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
             if !prompt.is_empty() {
-                self.logger.log_line("user prompt:");
-                self.logger.log_line("```");
-                self.logger.log_line(prompt);
-                self.logger.log_line("```");
+                self.logger.log_str("user prompt:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(prompt, true);
+                self.logger.log_str("```", true);
                 self.pending = Some(json!({
                     "role": "user",
                     "parts": [{ "text": prompt }]
@@ -196,10 +196,10 @@ impl Agent for GoogleAgent {
         let parsed = self.execute_request(&message)?;
         if let Some(text) = &parsed.text {
             if !text.is_empty() {
-                self.logger.log_line("agent content:");
-                self.logger.log_line("```");
-                self.logger.log_line(text);
-                self.logger.log_line("```");
+                self.logger.log_str("agent content:", true);
+                self.logger.log_str("```", true);
+                self.logger.log_str(text, true);
+                self.logger.log_str("```", true);
             }
         }
         if parsed.function_calls.is_empty() {
@@ -211,25 +211,25 @@ impl Agent for GoogleAgent {
     }
 
     fn finish(&self) {
-        self.logger.log_line("Sessions statistic");
+        self.logger.log_str("Sessions statistic", true);
         self.logger
-            .log_line(&format!("- total requests: {}", self.usage.requests));
+            .log_str(&format!("- total requests: {}", self.usage.requests), true);
         self.logger
-            .log_line(&format!("- total tokens: {}", self.consumed_tokens()));
-        self.logger.log_line(&format!(
+            .log_str(&format!("- total tokens: {}", self.consumed_tokens()), true);
+        self.logger.log_str(&format!(
             "    - input: {} (cached: {})",
             self.usage.input_tokens, self.usage.cached_tokens
-        ));
+        ), true);
         self.logger
-            .log_line(&format!("    - output: {}", self.usage.output_tokens));
-        self.logger.log_line(&format!(
+            .log_str(&format!("    - output: {}", self.usage.output_tokens), true);
+        self.logger.log_str(&format!(
             "- USD approximated: {}",
             super::format_usd(self.usage.total_cost_usd)
-        ));
-        self.logger.log_line(&format!(
+        ), true);
+        self.logger.log_str(&format!(
             "- USD real: {}",
             format_real_cost(self.usage.real_cost_usd)
-        ));
+        ), true);
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {

@@ -25,14 +25,6 @@ pub trait Logger: Send + Sync {
     /// does not start with `\n`, a `\n` prefix is added.
     /// `new_line = false` writes `message` exactly as supplied.
     fn log_str(&self, message: &str, new_line: bool);
-
-    /// Deprecated helper: write `message` as a fresh line.
-    ///
-    /// New code should call `log_str(message, true)` directly.
-    #[deprecated(note = "use `log_str(message, true)` instead")]
-    fn log_line(&self, message: &str) {
-        self.log_str(message, true);
-    }
 }
 
 #[cfg(test)]

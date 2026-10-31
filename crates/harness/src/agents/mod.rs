@@ -275,7 +275,7 @@ pub fn invoke_tool(
         Ok(result) => result,
         Err(e) => {
             let msg = format!("execution error: {e}");
-            logger.log_line(&format!("❌ fail → {msg}"));
+            logger.log_str(&format!("❌ fail → {msg}"), true);
             msg
         }
     }
