@@ -60,6 +60,7 @@ diff --git a/b.txt b/b.txt
 "#;
 
 /// Git tools bound to the fs allow-list and a configured executable.
+#[derive(Clone)]
 pub struct GitModule {
     sandbox: Arc<Mutex<Sandbox>>,
     executable: String,
@@ -67,7 +68,7 @@ pub struct GitModule {
     cwd: PathBuf,
     temp_dir: PathBuf,
     /// Set after the first `apply_diff_patch` error of this session.
-    help_shown: AtomicBool,
+    help_shown: Arc<AtomicBool>,
 }
 
 impl GitModule {
@@ -85,7 +86,7 @@ impl GitModule {
             execution_limit,
             cwd,
             temp_dir,
-            help_shown: AtomicBool::new(false),
+            help_shown: Arc::new(AtomicBool::new(false)),
         }
     }
 

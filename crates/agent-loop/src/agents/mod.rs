@@ -7,8 +7,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use logger::Logger;
+use interactions::{Interaction, OutputType};
 use tools::{ToolDescriptor, ToolRegistry};
+use tokio_util::sync::CancellationToken;
 
 mod alibaba;
 mod claude;
@@ -24,7 +25,8 @@ pub use google::GoogleAgent;
 pub use xai::XaiAgent;
 
 /// Contract implemented by vendor agents.
-pub trait Agent {
+#[async_trait::async_trait]
+pub trait Agent: Send + Sync {
     /// Vendor identifier (`SpaceXAI` / `GoogleAI` / `Claude` / `DeepSeek` / `AliBaba`).
     fn vendor(&self) -> &str;
     /// Display model name from the conf.
@@ -40,13 +42,15 @@ pub trait Agent {
     /// Vendor-reported USD so far. `None` if no response had a cost field.
     fn consumed_usd_real(&self) -> Option<f64>;
     /// Run one model turn. `true` = session complete (no tool calls).
-    fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String>;
-    /// Write usage statistics to the logger.
-    fn finish(&self);
+    async fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String>;
+    /// Write usage statistics through the [`Interaction`] contract.
+    async fn finish(&self);
     /// Snapshot session state to `path`.
     fn dump_session(&self, path: &Path) -> Result<(), String>;
     /// Restore session state from `path`.
     fn reload_session(&mut self, path: &Path) -> Result<(), String>;
+    /// Set the cancellation token checked before every vendor request.
+    fn set_cancel_token(&mut self, cancel: CancellationToken);
 }
 
 /// Shared usage counters stored in dump files.
@@ -191,6 +195,20 @@ fn json_f64(v: &serde_json::Value) -> Option<f64> {
         .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
 }
 
+/// Log a new-line record through the [`Interaction`] contract.
+pub(crate) async fn log_line(interaction: &Arc<dyn Interaction>, message: &str) {
+    let _ = interaction
+        .output(message, true, OutputType::NewLine)
+        .await;
+}
+
+/// Log a fragment continuing the current line.
+pub(crate) async fn log_cont(interaction: &Arc<dyn Interaction>, message: &str) {
+    let _ = interaction
+        .output(message, true, OutputType::ContinueLine)
+        .await;
+}
+
 /// Convert registry descriptors into OpenAI-style tool definitions.
 ///
 /// OpenAI-compatible vendors (DeepSeek, xAI, Qwen) require
@@ -265,17 +283,17 @@ fn object_json_schema(parameters: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Dispatch a tool call and return the result string (including execution errors).
-pub fn invoke_tool(
+pub async fn invoke_tool(
     tools: &ToolRegistry,
-    logger: &Arc<dyn Logger>,
+    interaction: &Arc<dyn Interaction>,
     name: &str,
     args: serde_json::Value,
 ) -> String {
-    match tools.call(name, args) {
+    match tools.call(name, args).await {
         Ok(result) => result,
         Err(e) => {
             let msg = format!("execution error: {e}");
-            logger.log_str(&format!("❌ fail → {msg}"), true);
+            log_line(interaction, &format!("❌ fail → {msg}")).await;
             msg
         }
     }

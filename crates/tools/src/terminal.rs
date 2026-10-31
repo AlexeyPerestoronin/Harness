@@ -14,6 +14,7 @@ use crate::process::run_observed_command;
 use crate::{arg_str, arg_str_or_empty, CallResult, ToolDescriptor};
 
 /// Shell tools bound to the terminal allow-lists.
+#[derive(Clone)]
 pub struct TerminalModule {
     /// Root workspace directory from `settings.cwd`.
     cwd: PathBuf,

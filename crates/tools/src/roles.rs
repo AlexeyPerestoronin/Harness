@@ -12,6 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::{arg_str, read_conf_owned_file, CallResult, ToolDescriptor};
 
 /// Roles catalog bound to `tools.roles` entries.
+#[derive(Clone)]
 pub struct RolesModule {
     items: BTreeMap<String, conf::RoleEntry>,
 }

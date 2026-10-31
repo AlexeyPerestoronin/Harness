@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// Help text embedded at compile time from `harness/crates/harness/help.txt`.
+/// Help text embedded at compile time from `crates/cli-harness/help.txt`.
 pub const HELP: &str = include_str!("../help.txt");
 
 /// Action selected by the CLI.

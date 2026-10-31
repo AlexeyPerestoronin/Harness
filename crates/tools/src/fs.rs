@@ -19,6 +19,7 @@ mod search;
 pub use access::{abspath, resolve_in_root, Sandbox};
 
 /// Filesystem tools bound to the allow-list this module owns.
+#[derive(Clone)]
 pub struct FsModule {
     sandbox: Arc<Mutex<Sandbox>>,
 }

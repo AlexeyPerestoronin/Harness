@@ -1,0 +1,22 @@
+[package]
+name = "cli-harness"
+version.workspace = true
+edition.workspace = true
+description = "Console harness.exe: CLI and asynchronous agent loop."
+
+[dependencies]
+# Load and validate harness.json5 / model files; generate --conf-new templates.
+conf = { path = "../conf" }
+# Session log sink used by CliInteraction.
+logger = { path = "../logger" }
+# Unified Interaction contract and CliInteraction implementation.
+interactions = { path = "../interactions" }
+# Tool registry and --help-tools text.
+tools = { path = "../tools" }
+# Asynchronous agent loop, agents, request pipeline and dump helpers.
+agent-loop = { path = "../agent-loop" }
+# JSON for dump settings and API-key file handling.
+serde_json = "1"
+# Async runtime for the CLI entry point.
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio-util = "0.7"

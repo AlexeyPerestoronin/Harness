@@ -9,22 +9,23 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use logger::Logger;
+use conf::{AgentKind, AgentSettings};
+use interactions::Interaction;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio_util::sync::CancellationToken;
 use tools::ToolRegistry;
 
 use super::{
-    accumulate_real_cost, approximate_usd, format_real_cost, gemini_tools, invoke_tool,
-    real_cost_from_body, Agent, RealCost, UsageStats,
+    accumulate_real_cost, approximate_usd, format_real_cost, gemini_tools, invoke_tool, log_cont,
+    log_line, real_cost_from_body, Agent, RealCost, UsageStats,
 };
 use crate::vendor_request::VendorRequest;
-use conf::{AgentKind, AgentSettings};
 
 /// Gemini agent (vendor `GoogleAI`).
 pub struct GoogleAgent {
     tools: Arc<ToolRegistry>,
-    logger: Arc<dyn Logger>,
+    interaction: Arc<dyn Interaction>,
     api_key: String,
     vendor: String,
     display_name: String,
@@ -38,13 +39,14 @@ pub struct GoogleAgent {
     usage: UsageStats,
     history: Vec<Value>,
     pending: Option<Value>,
+    cancel: CancellationToken,
 }
 
 impl GoogleAgent {
     /// Build an agent with a resolved API key.
     pub fn new(
         tools: Arc<ToolRegistry>,
-        logger: Arc<dyn Logger>,
+        interaction: Arc<dyn Interaction>,
         agent: &AgentSettings,
     ) -> Result<Self, String> {
         let api_model = match &agent.kind {
@@ -53,7 +55,7 @@ impl GoogleAgent {
         };
         Ok(Self {
             tools,
-            logger: logger.clone(),
+            interaction: interaction.clone(),
             api_key: agent.api_key.clone(),
             vendor: agent.vendor.clone(),
             display_name: agent.name.clone(),
@@ -63,10 +65,11 @@ impl GoogleAgent {
             input_price: agent.input_price,
             output_price: agent.output_price,
             cached_price: agent.cached_price,
-            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
+            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, interaction),
             usage: UsageStats::default(),
             history: Vec::new(),
             pending: None,
+            cancel: CancellationToken::new(),
         })
     }
 
@@ -77,7 +80,7 @@ impl GoogleAgent {
         )
     }
 
-    fn execute_request(&mut self, message: &Value) -> Result<ParsedGoogle, String> {
+    async fn execute_request(&mut self, message: &Value) -> Result<ParsedGoogle, String> {
         let mut contents = self.history.clone();
         contents.push(message.clone());
         let body = json!({
@@ -86,14 +89,18 @@ impl GoogleAgent {
         });
         let url = self.url();
         let api_key = self.api_key.clone();
-        let text = self.http.send_json(
-            &url,
-            &[
-                ("x-goog-api-key", api_key.as_str()),
-                ("Content-Type", "application/json"),
-            ],
-            &body,
-        )?;
+        let text = self
+            .http
+            .send_json(
+                &url,
+                &[
+                    ("x-goog-api-key", api_key.as_str()),
+                    ("Content-Type", "application/json"),
+                ],
+                &body,
+                &self.cancel,
+            )
+            .await?;
         let parsed = parse_google_response(&text)?;
         self.http
             .record_tokens(parsed.prompt_tokens + parsed.candidates_tokens);
@@ -117,8 +124,8 @@ impl GoogleAgent {
         Ok(parsed)
     }
 
-    fn handle_tool_calls(&self, calls: &[GoogleFnCall]) -> Value {
-        self.logger.log_str("agent request tools:", true);
+    async fn handle_tool_calls(&self, calls: &[GoogleFnCall]) -> Value {
+        log_line(&self.interaction, "agent request tools:").await;
         let mut parts = Vec::new();
         for (i, fc) in calls.iter().enumerate() {
             let log_arg = if fc.name == "write_file" {
@@ -126,20 +133,26 @@ impl GoogleAgent {
             } else {
                 fc.args.to_string()
             };
-            self.logger
-                .log_str(&format!("{}. {}({log_arg})", i + 1, fc.name), true);
-            let result = invoke_tool(&self.tools, &self.logger, &fc.name, fc.args.clone());
+            log_line(
+                &self.interaction,
+                &format!("{}. {}({log_arg})", i + 1, fc.name),
+            )
+            .await;
+            let result = invoke_tool(&self.tools, &self.interaction, &fc.name, fc.args.clone()).await;
             if result.starts_with("execution error:") {
-                self.logger.log_str(&format!(" → fail → {result}"), false);
+                log_cont(&self.interaction, &format!(" → fail → {result}")).await;
             } else {
-                self.logger.log_str(" → success", false);
+                log_cont(&self.interaction, " → success").await;
                 if fc.name == "read_file" || fc.name == "write_file" {
-                    self.logger
-                        .log_str(&format!(" → read/write {}symbols", result.len()), false);
+                    log_cont(
+                        &self.interaction,
+                        &format!(" → read/write {}symbols", result.len()),
+                    )
+                    .await;
                 } else {
-                    self.logger.log_str("```", true);
-                    self.logger.log_str(&result, true);
-                    self.logger.log_str("```", true);
+                    log_line(&self.interaction, "```").await;
+                    log_line(&self.interaction, &result).await;
+                    log_line(&self.interaction, "```").await;
                 }
             }
             parts.push(json!({
@@ -153,6 +166,7 @@ impl GoogleAgent {
     }
 }
 
+#[async_trait::async_trait]
 impl Agent for GoogleAgent {
     fn vendor(&self) -> &str {
         &self.vendor
@@ -176,13 +190,13 @@ impl Agent for GoogleAgent {
         self.usage.real_cost_usd
     }
 
-    fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
+    async fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
             if !prompt.is_empty() {
-                self.logger.log_str("user prompt:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(prompt, true);
-                self.logger.log_str("```", true);
+                log_line(&self.interaction, "user prompt:").await;
+                log_line(&self.interaction, "```").await;
+                log_line(&self.interaction, prompt).await;
+                log_line(&self.interaction, "```").await;
                 self.pending = Some(json!({
                     "role": "user",
                     "parts": [{ "text": prompt }]
@@ -193,43 +207,64 @@ impl Agent for GoogleAgent {
             .pending
             .take()
             .ok_or_else(|| "Google agent has no pending message".to_string())?;
-        let parsed = self.execute_request(&message)?;
+        let parsed = self.execute_request(&message).await?;
         if let Some(text) = &parsed.text {
             if !text.is_empty() {
-                self.logger.log_str("agent content:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(text, true);
-                self.logger.log_str("```", true);
+                log_line(&self.interaction, "agent content:").await;
+                log_line(&self.interaction, "```").await;
+                log_line(&self.interaction, text).await;
+                log_line(&self.interaction, "```").await;
             }
         }
         if parsed.function_calls.is_empty() {
             Ok(true)
         } else {
-            self.pending = Some(self.handle_tool_calls(&parsed.function_calls));
+            self.pending = Some(self.handle_tool_calls(&parsed.function_calls).await);
             Ok(false)
         }
     }
 
-    fn finish(&self) {
-        self.logger.log_str("Sessions statistic", true);
-        self.logger
-            .log_str(&format!("- total requests: {}", self.usage.requests), true);
-        self.logger
-            .log_str(&format!("- total tokens: {}", self.consumed_tokens()), true);
-        self.logger.log_str(&format!(
-            "    - input: {} (cached: {})",
-            self.usage.input_tokens, self.usage.cached_tokens
-        ), true);
-        self.logger
-            .log_str(&format!("    - output: {}", self.usage.output_tokens), true);
-        self.logger.log_str(&format!(
-            "- USD approximated: {}",
-            super::format_usd(self.usage.total_cost_usd)
-        ), true);
-        self.logger.log_str(&format!(
-            "- USD real: {}",
-            format_real_cost(self.usage.real_cost_usd)
-        ), true);
+    async fn finish(&self) {
+        log_line(&self.interaction, "Sessions statistic").await;
+        log_line(
+            &self.interaction,
+            &format!("- total requests: {}", self.usage.requests),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!("- total tokens: {}", self.consumed_tokens()),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "    - input: {} (cached: {})",
+                self.usage.input_tokens, self.usage.cached_tokens
+            ),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!("    - output: {}", self.usage.output_tokens),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "- USD approximated: {}",
+                super::format_usd(self.usage.total_cost_usd)
+            ),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "- USD real: {}",
+                format_real_cost(self.usage.real_cost_usd)
+            ),
+        )
+        .await;
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {
@@ -249,6 +284,10 @@ impl Agent for GoogleAgent {
         self.history = data.history;
         self.pending = data.pending_message;
         Ok(())
+    }
+
+    fn set_cancel_token(&mut self, cancel: CancellationToken) {
+        self.cancel = cancel;
     }
 }
 

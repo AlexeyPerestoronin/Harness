@@ -8,17 +8,18 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use logger::Logger;
+use conf::AgentSettings;
+use interactions::Interaction;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio_util::sync::CancellationToken;
 use tools::ToolRegistry;
 
 use super::{
-    accumulate_real_cost, approximate_usd, format_real_cost, invoke_tool, openai_tools,
+    accumulate_real_cost, approximate_usd, format_real_cost, invoke_tool, log_line, openai_tools,
     real_cost_from_body, Agent, RealCost, UsageStats,
 };
 use crate::vendor_request::VendorRequest;
-use conf::AgentSettings;
 
 /// Session dump shared by DeepSeek and AliBaba (no vendor conversation id).
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,7 +53,7 @@ pub(crate) struct ParsedChat {
 /// OpenAI-compatible chat agent used by DeepSeek and AliBaba wrappers.
 pub(crate) struct OpenAiCompatAgent {
     tools: Arc<ToolRegistry>,
-    logger: Arc<dyn Logger>,
+    interaction: Arc<dyn Interaction>,
     api_key: String,
     vendor: String,
     vendor_label: &'static str,
@@ -67,6 +68,7 @@ pub(crate) struct OpenAiCompatAgent {
     usage: UsageStats,
     messages: Vec<Value>,
     http: VendorRequest,
+    cancel: CancellationToken,
 }
 
 impl OpenAiCompatAgent {
@@ -74,7 +76,7 @@ impl OpenAiCompatAgent {
     /// from `AgentSettings`, not from a vendor-specific hardcoded table.
     pub(crate) fn create(
         tools: Arc<ToolRegistry>,
-        logger: Arc<dyn Logger>,
+        interaction: Arc<dyn Interaction>,
         agent: &AgentSettings,
         api_model: String,
         url: &'static str,
@@ -82,7 +84,7 @@ impl OpenAiCompatAgent {
     ) -> Self {
         Self {
             tools,
-            logger: logger.clone(),
+            interaction: interaction.clone(),
             api_key: agent.api_key.clone(),
             vendor: agent.vendor.clone(),
             vendor_label,
@@ -96,11 +98,12 @@ impl OpenAiCompatAgent {
             cached_price: agent.cached_price,
             usage: UsageStats::default(),
             messages: Vec::new(),
-            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
+            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, interaction),
+            cancel: CancellationToken::new(),
         }
     }
 
-    fn execute_request(&mut self) -> Result<ParsedChat, String> {
+    async fn execute_request(&mut self) -> Result<ParsedChat, String> {
         let tools = openai_tools(&self.tools.list());
         let body = json!({
             "model": self.api_model,
@@ -108,14 +111,18 @@ impl OpenAiCompatAgent {
             "tools": tools,
         });
         let auth = format!("Bearer {}", self.api_key);
-        let text = self.http.send_json(
-            self.url,
-            &[
-                ("Authorization", auth.as_str()),
-                ("Content-Type", "application/json"),
-            ],
-            &body,
-        )?;
+        let text = self
+            .http
+            .send_json(
+                self.url,
+                &[
+                    ("Authorization", auth.as_str()),
+                    ("Content-Type", "application/json"),
+                ],
+                &body,
+                &self.cancel,
+            )
+            .await?;
         let parsed = parse_chat_completion(&text, self.vendor_label)?;
         self.http
             .record_tokens(parsed.prompt_tokens + parsed.completion_tokens);
@@ -135,8 +142,8 @@ impl OpenAiCompatAgent {
         Ok(parsed)
     }
 
-    fn handle_tool_calls(&mut self, calls: &[ChatToolCall]) {
-        self.logger.log_str("agent request tools:", true);
+    async fn handle_tool_calls(&mut self, calls: &[ChatToolCall]) {
+        log_line(&self.interaction, "agent request tools:").await;
         for (i, call) in calls.iter().enumerate() {
             let raw_args = if call.arguments.is_empty() {
                 "{}".to_string()
@@ -148,12 +155,15 @@ impl OpenAiCompatAgent {
             } else {
                 raw_args.clone()
             };
-            self.logger
-                .log_str(&format!("{}. {}({log_arg})", i + 1, call.name), true);
+            log_line(
+                &self.interaction,
+                &format!("{}. {}({log_arg})", i + 1, call.name),
+            )
+            .await;
             let args: Value = serde_json::from_str(&raw_args).unwrap_or_else(|_| json!({}));
-            let result = invoke_tool(&self.tools, &self.logger, &call.name, args);
+            let result = invoke_tool(&self.tools, &self.interaction, &call.name, args).await;
             if !result.starts_with("execution error:") {
-                self.logger.log_str("✅ success", true);
+                log_line(&self.interaction, "✅ success").await;
             }
             self.messages.push(json!({
                 "role": "tool",
@@ -164,6 +174,7 @@ impl OpenAiCompatAgent {
     }
 }
 
+#[async_trait::async_trait]
 impl Agent for OpenAiCompatAgent {
     fn vendor(&self) -> &str {
         &self.vendor
@@ -187,72 +198,89 @@ impl Agent for OpenAiCompatAgent {
         self.usage.real_cost_usd
     }
 
-    fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
+    async fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
             if !prompt.is_empty() {
-                self.logger.log_str("user prompt:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(prompt, true);
-                self.logger.log_str("```", true);
+                log_line(&self.interaction, "user prompt:").await;
+                log_line(&self.interaction, "```").await;
+                log_line(&self.interaction, prompt).await;
+                log_line(&self.interaction, "```").await;
                 self.messages
                     .push(json!({"role": "user", "content": prompt}));
             }
         }
-        let parsed = self.execute_request()?;
+        let parsed = self.execute_request().await?;
         if let Some(role) = &parsed.role {
-            self.logger.log_str(&format!("role: {role}"), true);
+            log_line(&self.interaction, &format!("role: {role}")).await;
         }
         if let Some(reasoning) = &parsed.reasoning {
             if !reasoning.is_empty() {
-                self.logger.log_str("request reasoning:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(reasoning, true);
-                self.logger.log_str("```", true);
+                log_line(&self.interaction, "request reasoning:").await;
+                log_line(&self.interaction, "```").await;
+                log_line(&self.interaction, reasoning).await;
+                log_line(&self.interaction, "```").await;
             }
         }
         if let Some(content) = &parsed.content {
             if !content.is_empty() {
-                self.logger.log_str("agent content:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(content, true);
-                self.logger.log_str("```", true);
+                log_line(&self.interaction, "agent content:").await;
+                log_line(&self.interaction, "```").await;
+                log_line(&self.interaction, content).await;
+                log_line(&self.interaction, "```").await;
             }
         }
         self.messages.push(parsed.message.clone());
         if parsed.tool_calls.is_empty() {
             Ok(true)
         } else {
-            self.handle_tool_calls(&parsed.tool_calls);
+            self.handle_tool_calls(&parsed.tool_calls).await;
             Ok(false)
         }
     }
 
-    fn finish(&self) {
+    async fn finish(&self) {
         let total = self.usage.input_tokens + self.usage.output_tokens;
-        self.logger.log_str("Sessions statistic", true);
-        self.logger
-            .log_str(&format!("- total requests: {}", self.usage.requests), true);
-        self.logger.log_str(&format!("- total tokens: {total}"), true);
-        self.logger.log_str(&format!(
-            "    → input tokens: {} (from stats)",
-            self.usage.input_tokens
-        ), true);
-        self.logger.log_str(&format!(
-            "    ← output tokens: {}",
-            self.usage.output_tokens
-        ), true);
-        self.logger.log_str(&format!(
-            "    ↔ cached tokens: {}",
-            self.usage.cached_tokens
-        ), true);
-        self.logger.log_str(&format!(
-            "- USD approximated: {}",
-            super::format_usd(self.usage.total_cost_usd)
-        ), true);
-        self.logger.log_str(&format!(
-            "- USD real: {}",
-            format_real_cost(self.usage.real_cost_usd)
-        ), true);
+        log_line(&self.interaction, "Sessions statistic").await;
+        log_line(
+            &self.interaction,
+            &format!("- total requests: {}", self.usage.requests),
+        )
+        .await;
+        log_line(&self.interaction, &format!("- total tokens: {total}")).await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "    → input tokens: {} (from stats)",
+                self.usage.input_tokens
+            ),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!("    ← output tokens: {}", self.usage.output_tokens),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!("    ↔ cached tokens: {}", self.usage.cached_tokens),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "- USD approximated: {}",
+                super::format_usd(self.usage.total_cost_usd)
+            ),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "- USD real: {}",
+                format_real_cost(self.usage.real_cost_usd)
+            ),
+        )
+        .await;
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {
@@ -270,6 +298,10 @@ impl Agent for OpenAiCompatAgent {
         self.messages = data.messages;
         self.usage = data.usage_stats;
         Ok(())
+    }
+
+    fn set_cancel_token(&mut self, cancel: CancellationToken) {
+        self.cancel = cancel;
     }
 }
 

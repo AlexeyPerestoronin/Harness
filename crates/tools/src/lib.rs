@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use logger::Logger;
+use interactions::{Interaction, OutputType};
 use serde_json::{Map, Value};
 
 pub mod fs;
@@ -78,6 +78,7 @@ impl CallResult {
     }
 }
 
+#[derive(Clone)]
 enum Module {
     Fs(FsModule),
     Git(GitModule),
@@ -103,12 +104,13 @@ impl Module {
         }
     }
 
-    fn call(&self, name: &str, args: &Map<String, Value>) -> Result<CallResult, String> {
+    /// Synchronous tool modules only. `UserModule` is dispatched asynchronously.
+    fn call_sync(&self, name: &str, args: &Map<String, Value>) -> Result<CallResult, String> {
         match self {
             Module::Fs(m) => m.call(name, args),
             Module::Git(m) => m.call(name, args),
             Module::Terminal(m) => m.call(name, args),
-            Module::User(m) => m.call(name, args),
+            Module::User(_) => Err(format!("tool '{name}' is asynchronous")),
             Module::Skills(m) => m.call(name, args),
             Module::Roles(m) => m.call(name, args),
         }
@@ -119,16 +121,16 @@ impl Module {
 pub struct ToolsContext {
     /// Agent workspace (`settings.cwd`).
     pub cwd: PathBuf,
-    /// Session log directory used as `temp-dir` for patches.
+    /// Session directory used as `temp-dir` for patches.
     pub temp_dir: PathBuf,
-    /// Shared session logger.
-    pub logger: Arc<dyn Logger>,
+    /// Shared user interaction contract.
+    pub interaction: Arc<dyn Interaction>,
 }
 
 /// Flat dispatch table of enabled tool modules.
 pub struct ToolRegistry {
     modules: Vec<Module>,
-    logger: Arc<dyn Logger>,
+    interaction: Arc<dyn Interaction>,
 }
 
 impl ToolRegistry {
@@ -163,7 +165,11 @@ impl ToolRegistry {
             )));
         }
         if settings.user.is_some() {
-            modules.push(Module::User(UserModule::new(sandbox, command_timeout)));
+            modules.push(Module::User(UserModule::new(
+                sandbox,
+                command_timeout,
+                ctx.interaction.clone(),
+            )));
         }
         if let Some(skills) = settings.skills.clone() {
             modules.push(Module::Skills(SkillsModule::new(skills)));
@@ -174,7 +180,7 @@ impl ToolRegistry {
 
         Self {
             modules,
-            logger: ctx.logger,
+            interaction: ctx.interaction,
         }
     }
 
@@ -184,7 +190,11 @@ impl ToolRegistry {
     }
 
     /// Dispatch `name` to the owning module and log the result like Python `DefaultTools.call`.
-    pub fn call(&self, name: &str, args: Value) -> Result<String, String> {
+    ///
+    /// Blocking modules (`fs`, `git`, `terminal`, `skills`, `roles`) run on the
+    /// blocking thread pool; `user` is natively asynchronous because it talks
+    /// to the [`Interaction`] contract.
+    pub async fn call(&self, name: &str, args: Value) -> Result<String, String> {
         let map = match args {
             Value::Object(m) => m,
             Value::Null => Map::new(),
@@ -199,23 +209,67 @@ impl ToolRegistry {
             .iter()
             .find(|m| m.owns(name))
             .ok_or_else(|| format!("tool '{name}' not available"))?;
-        let result = module.call(name, &map)?;
+        let result = if let Module::User(user) = module {
+            user.call(name, &map).await?
+        } else {
+            let name_owned = name.to_string();
+            let module = module.clone();
+            tokio::task::spawn_blocking(move || module.call_sync(&name_owned, &map))
+                .await
+                .map_err(|e| format!("tool '{name}' execution failed: {e}"))?
+                .map_err(|e| e)?
+        };
+        self.log_result(&result).await;
+        Ok(result.output)
+    }
+
+    async fn log_result(&self, result: &CallResult) {
         match &result.kind {
-            CallKind::Patch { tmp } => self.logger.log_str(&format!("Apply patch {tmp}"), true),
-            CallKind::Read => self
-                .logger
-                .log_str(&format!("Read {}symbols", result.output.len()), true),
-            CallKind::Write => self
-                .logger
-                .log_str(&format!("Write {}symbols", result.output.len()), true),
+            CallKind::Patch { tmp } => {
+                let _ = self
+                    .interaction
+                    .output(&format!("Apply patch {tmp}"), true, OutputType::NewLine)
+                    .await;
+            }
+            CallKind::Read => {
+                let _ = self
+                    .interaction
+                    .output(
+                        &format!("Read {}symbols", result.output.len()),
+                        true,
+                        OutputType::NewLine,
+                    )
+                    .await;
+            }
+            CallKind::Write => {
+                let _ = self
+                    .interaction
+                    .output(
+                        &format!("Write {}symbols", result.output.len()),
+                        true,
+                        OutputType::NewLine,
+                    )
+                    .await;
+            }
             CallKind::Normal => {
-                self.logger.log_str("Result:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(&result.output, true);
-                self.logger.log_str("```", true);
+                let _ = self
+                    .interaction
+                    .output("Result:", true, OutputType::NewLine)
+                    .await;
+                let _ = self
+                    .interaction
+                    .output("```", true, OutputType::NewLine)
+                    .await;
+                let _ = self
+                    .interaction
+                    .output(&result.output, true, OutputType::NewLine)
+                    .await;
+                let _ = self
+                    .interaction
+                    .output("```", true, OutputType::NewLine)
+                    .await;
             }
         }
-        Ok(result.output)
     }
 }
 

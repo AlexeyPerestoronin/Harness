@@ -12,6 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::{arg_str, read_conf_owned_file, CallResult, ToolDescriptor};
 
 /// Skills catalog bound to `tools.skills` entries.
+#[derive(Clone)]
 pub struct SkillsModule {
     items: BTreeMap<String, conf::SkillEntry>,
 }

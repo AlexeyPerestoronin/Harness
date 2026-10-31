@@ -1,53 +1,53 @@
-//! DeepSeek agent over OpenAI-compatible `chat/completions`.
+//! AliBaba (Qwen) agent over DashScope OpenAI-compatible `chat/completions`.
 //!
-//! Models: `deepseek-chat` (V3), `deepseek-reasoner` (R1), `deepseek-flash`
-//! and `deepseek-v4-pro`. Prefix cache is automatic;
-//! `prompt_cache_hit_tokens` maps to `UsageStats.cached_tokens`.
-//! Prices come from the loaded model settings, not from this file.
+//! Cache hits are read from usage when present. Prices come from the loaded
+//! model settings, not from this file.
 //! HTTP goes through [`crate::vendor_request::VendorRequest`].
 
 use std::path::Path;
 use std::sync::Arc;
 
-use logger::Logger;
+use conf::{AgentKind, AgentSettings};
+use interactions::Interaction;
+use tokio_util::sync::CancellationToken;
 use tools::ToolRegistry;
 
 use super::openai_compat::OpenAiCompatAgent;
 use super::Agent;
-use conf::{AgentKind, AgentSettings};
 
-const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
+const ALIBABA_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 
-/// DeepSeek agent (vendor `DeepSeek`).
-pub struct DeepSeekAgent {
+/// AliBaba Qwen agent (vendor `AliBaba`).
+pub struct AlibabaAgent {
     inner: OpenAiCompatAgent,
 }
 
-impl DeepSeekAgent {
+impl AlibabaAgent {
     /// Build an agent with a resolved API key (not a path, not a filename).
     pub fn new(
         tools: Arc<ToolRegistry>,
-        logger: Arc<dyn Logger>,
+        interaction: Arc<dyn Interaction>,
         agent: &AgentSettings,
     ) -> Result<Self, String> {
         let api_model = match &agent.kind {
-            AgentKind::DeepSeek { api_model } => api_model.clone(),
-            _ => return Err("expected DeepSeek agent settings".into()),
+            AgentKind::Alibaba { api_model } => api_model.clone(),
+            _ => return Err("expected AliBaba agent settings".into()),
         };
         Ok(Self {
             inner: OpenAiCompatAgent::create(
                 tools,
-                logger,
+                interaction,
                 agent,
                 api_model,
-                DEEPSEEK_URL,
-                "DeepSeek",
+                ALIBABA_URL,
+                "AliBaba",
             ),
         })
     }
 }
 
-impl Agent for DeepSeekAgent {
+#[async_trait::async_trait]
+impl Agent for AlibabaAgent {
     fn vendor(&self) -> &str {
         self.inner.vendor()
     }
@@ -69,16 +69,19 @@ impl Agent for DeepSeekAgent {
     fn consumed_usd_real(&self) -> Option<f64> {
         self.inner.consumed_usd_real()
     }
-    fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
-        self.inner.iteration(prompt)
+    async fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
+        self.inner.iteration(prompt).await
     }
-    fn finish(&self) {
-        self.inner.finish()
+    async fn finish(&self) {
+        self.inner.finish().await
     }
     fn dump_session(&self, path: &Path) -> Result<(), String> {
         self.inner.dump_session(path)
     }
     fn reload_session(&mut self, path: &Path) -> Result<(), String> {
         self.inner.reload_session(path)
+    }
+    fn set_cancel_token(&mut self, cancel: CancellationToken) {
+        self.inner.set_cancel_token(cancel);
     }
 }

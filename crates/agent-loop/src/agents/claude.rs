@@ -10,17 +10,18 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use logger::Logger;
+use conf::{AgentKind, AgentSettings};
+use interactions::Interaction;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio_util::sync::CancellationToken;
 use tools::ToolRegistry;
 
 use super::{
-    accumulate_real_cost, approximate_usd, claude_tools, format_real_cost, invoke_tool,
+    accumulate_real_cost, approximate_usd, claude_tools, format_real_cost, invoke_tool, log_line,
     real_cost_from_body, Agent, RealCost, UsageStats,
 };
 use crate::vendor_request::VendorRequest;
-use conf::{AgentKind, AgentSettings};
 
 const CLAUDE_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -31,7 +32,7 @@ const MODEL_MAX_OUTPUT_TOKENS: i64 = 128_000;
 /// Claude agent (vendor `Claude`).
 pub struct ClaudeAgent {
     tools: Arc<ToolRegistry>,
-    logger: Arc<dyn Logger>,
+    interaction: Arc<dyn Interaction>,
     api_key: String,
     vendor: String,
     display_name: String,
@@ -44,13 +45,14 @@ pub struct ClaudeAgent {
     usage: UsageStats,
     messages: Vec<Value>,
     http: VendorRequest,
+    cancel: CancellationToken,
 }
 
 impl ClaudeAgent {
     /// Build an agent with a resolved API key (not a path, not a filename).
     pub fn new(
         tools: Arc<ToolRegistry>,
-        logger: Arc<dyn Logger>,
+        interaction: Arc<dyn Interaction>,
         agent: &AgentSettings,
     ) -> Result<Self, String> {
         let api_model = match &agent.kind {
@@ -59,7 +61,7 @@ impl ClaudeAgent {
         };
         Ok(Self {
             tools,
-            logger: logger.clone(),
+            interaction: interaction.clone(),
             api_key: agent.api_key.clone(),
             vendor: agent.vendor.clone(),
             display_name: agent.name.clone(),
@@ -71,7 +73,8 @@ impl ClaudeAgent {
             cached_price: agent.cached_price,
             usage: UsageStats::default(),
             messages: Vec::new(),
-            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, logger),
+            http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, interaction),
+            cancel: CancellationToken::new(),
         })
     }
 
@@ -79,7 +82,7 @@ impl ClaudeAgent {
         claude_max_output_tokens(self.token_limit)
     }
 
-    fn execute_request(&mut self) -> Result<ParsedClaude, String> {
+    async fn execute_request(&mut self) -> Result<ParsedClaude, String> {
         let tools = claude_tools(&self.tools.list());
         let body = json!({
             "model": self.api_model,
@@ -88,15 +91,19 @@ impl ClaudeAgent {
             "tools": tools,
         });
         let api_key = self.api_key.clone();
-        let text = self.http.send_json(
-            CLAUDE_URL,
-            &[
-                ("x-api-key", api_key.as_str()),
-                ("anthropic-version", ANTHROPIC_VERSION),
-                ("Content-Type", "application/json"),
-            ],
-            &body,
-        )?;
+        let text = self
+            .http
+            .send_json(
+                CLAUDE_URL,
+                &[
+                    ("x-api-key", api_key.as_str()),
+                    ("anthropic-version", ANTHROPIC_VERSION),
+                    ("Content-Type", "application/json"),
+                ],
+                &body,
+                &self.cancel,
+            )
+            .await?;
         let parsed = parse_claude_response(&text)?;
         self.http
             .record_tokens(parsed.input_tokens + parsed.output_tokens);
@@ -116,8 +123,8 @@ impl ClaudeAgent {
         Ok(parsed)
     }
 
-    fn handle_tool_uses(&mut self, calls: &[ClaudeToolUse]) {
-        self.logger.log_str("agent request tools:", true);
+    async fn handle_tool_uses(&mut self, calls: &[ClaudeToolUse]) {
+        log_line(&self.interaction, "agent request tools:").await;
         let mut results = Vec::new();
         for (i, call) in calls.iter().enumerate() {
             let raw_args = call.input.to_string();
@@ -126,11 +133,14 @@ impl ClaudeAgent {
             } else {
                 raw_args
             };
-            self.logger
-                .log_str(&format!("{}. {}({log_arg})", i + 1, call.name), true);
-            let result = invoke_tool(&self.tools, &self.logger, &call.name, call.input.clone());
+            log_line(
+                &self.interaction,
+                &format!("{}. {}({log_arg})", i + 1, call.name),
+            )
+            .await;
+            let result = invoke_tool(&self.tools, &self.interaction, &call.name, call.input.clone()).await;
             if !result.starts_with("execution error:") {
-                self.logger.log_str("✅ success", true);
+                log_line(&self.interaction, "✅ success").await;
             }
             results.push(json!({
                 "type": "tool_result",
@@ -145,6 +155,7 @@ impl ClaudeAgent {
     }
 }
 
+#[async_trait::async_trait]
 impl Agent for ClaudeAgent {
     fn vendor(&self) -> &str {
         &self.vendor
@@ -168,24 +179,24 @@ impl Agent for ClaudeAgent {
         self.usage.real_cost_usd
     }
 
-    fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
+    async fn iteration(&mut self, prompt: Option<&str>) -> Result<bool, String> {
         if let Some(prompt) = prompt {
             if !prompt.is_empty() {
-                self.logger.log_str("user prompt:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(prompt, true);
-                self.logger.log_str("```", true);
+                log_line(&self.interaction, "user prompt:").await;
+                log_line(&self.interaction, "```").await;
+                log_line(&self.interaction, prompt).await;
+                log_line(&self.interaction, "```").await;
                 self.messages
                     .push(json!({"role": "user", "content": prompt}));
             }
         }
-        let parsed = self.execute_request()?;
+        let parsed = self.execute_request().await?;
         if let Some(content) = &parsed.text {
             if !content.is_empty() {
-                self.logger.log_str("agent content:", true);
-                self.logger.log_str("```", true);
-                self.logger.log_str(content, true);
-                self.logger.log_str("```", true);
+                log_line(&self.interaction, "agent content:").await;
+                log_line(&self.interaction, "```").await;
+                log_line(&self.interaction, content).await;
+                log_line(&self.interaction, "```").await;
             }
         }
         self.messages.push(json!({
@@ -195,37 +206,54 @@ impl Agent for ClaudeAgent {
         if parsed.tool_uses.is_empty() {
             Ok(true)
         } else {
-            self.handle_tool_uses(&parsed.tool_uses);
+            self.handle_tool_uses(&parsed.tool_uses).await;
             Ok(false)
         }
     }
 
-    fn finish(&self) {
+    async fn finish(&self) {
         let total = self.usage.input_tokens + self.usage.output_tokens;
-        self.logger.log_str("Sessions statistic", true);
-        self.logger
-            .log_str(&format!("- total requests: {}", self.usage.requests), true);
-        self.logger.log_str(&format!("- total tokens: {total}"), true);
-        self.logger.log_str(&format!(
-            "    → input tokens: {} (from stats)",
-            self.usage.input_tokens
-        ), true);
-        self.logger.log_str(&format!(
-            "    ← output tokens: {}",
-            self.usage.output_tokens
-        ), true);
-        self.logger.log_str(&format!(
-            "    ↔ cached tokens: {}",
-            self.usage.cached_tokens
-        ), true);
-        self.logger.log_str(&format!(
-            "- USD approximated: {}",
-            super::format_usd(self.usage.total_cost_usd)
-        ), true);
-        self.logger.log_str(&format!(
-            "- USD real: {}",
-            format_real_cost(self.usage.real_cost_usd)
-        ), true);
+        log_line(&self.interaction, "Sessions statistic").await;
+        log_line(
+            &self.interaction,
+            &format!("- total requests: {}", self.usage.requests),
+        )
+        .await;
+        log_line(&self.interaction, &format!("- total tokens: {total}")).await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "    → input tokens: {} (from stats)",
+                self.usage.input_tokens
+            ),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!("    ← output tokens: {}", self.usage.output_tokens),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!("    ↔ cached tokens: {}", self.usage.cached_tokens),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "- USD approximated: {}",
+                super::format_usd(self.usage.total_cost_usd)
+            ),
+        )
+        .await;
+        log_line(
+            &self.interaction,
+            &format!(
+                "- USD real: {}",
+                format_real_cost(self.usage.real_cost_usd)
+            ),
+        )
+        .await;
     }
 
     fn dump_session(&self, path: &Path) -> Result<(), String> {
@@ -243,6 +271,10 @@ impl Agent for ClaudeAgent {
         self.messages = data.messages;
         self.usage = data.usage;
         Ok(())
+    }
+
+    fn set_cancel_token(&mut self, cancel: CancellationToken) {
+        self.cancel = cancel;
     }
 }
 
