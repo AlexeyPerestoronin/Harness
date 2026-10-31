@@ -29,6 +29,23 @@
     },
     // Workspace of the agent (tools and logs). Must be set explicitly.
     "cwd": "${vars:workspace}",
+    // HTTPS server settings used by `harness.exe --serve`.
+    "server": {
+        // Bind address. Remote access only with explicit `--host`.
+        "host": "127.0.0.1",
+        // HTTPS port used when `--port` is not passed.
+        "port": 4067,
+        // Idle minutes before the server exits. Polling does not reset it.
+        "live-timeout": 5,
+        // Minutes to wait for a user response to a pending input.
+        "interaction-timeout": 10,
+        // Allowed CORS origins. Empty list = CORS disabled. `"*"` is not supported.
+        "cors-allowed-origins": [],
+        // Optional PEM certificate path. `null` = auto-generate a self-signed one.
+        "tls-cert": null,
+        // Optional PEM private-key path. Must be set together with `tls-cert`.
+        "tls-key": null
+    },
     // Model file, confirmation mode, session limits and log folder.
     "agent": {
         // Path to an agent file or to a folder with agent files (you will be asked to choose).

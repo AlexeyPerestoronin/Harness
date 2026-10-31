@@ -18,6 +18,27 @@ pub const TOOLS: &str = "tools";
 pub const VARS: &str = "vars";
 
 // ---------------------------------------------------------------------------
+// server
+// ---------------------------------------------------------------------------
+
+/// Root object of the server settings (`harness.exe --serve`).
+pub const SERVER: &str = "server";
+/// Bind address of the HTTPS server.
+pub const HOST: &str = "host";
+/// HTTPS port used when `--port` is not passed.
+pub const PORT: &str = "port";
+/// Idle timeout in minutes before the server exits.
+pub const LIVE_TIMEOUT: &str = "live-timeout";
+/// Timeout in minutes for a pending user interaction.
+pub const INTERACTION_TIMEOUT: &str = "interaction-timeout";
+/// Allowed CORS origins. Empty = CORS disabled; `"*"` is not supported.
+pub const CORS_ALLOWED_ORIGINS: &str = "cors-allowed-origins";
+/// Optional path to a PEM TLS certificate.
+pub const TLS_CERT: &str = "tls-cert";
+/// Optional path to a PEM TLS private key.
+pub const TLS_KEY: &str = "tls-key";
+
+// ---------------------------------------------------------------------------
 // agent
 // ---------------------------------------------------------------------------
 

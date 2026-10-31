@@ -154,6 +154,124 @@ fn same_price(left: f64, right: f64) -> bool {
     left.to_bits() == right.to_bits()
 }
 
+/// Coarse configuration state returned by server config loading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigState {
+    /// Configuration exists and passed validation.
+    Ok,
+    /// Configuration file does not exist.
+    Missing,
+    /// Configuration file exists but could not be loaded or validated.
+    Invalid,
+}
+
+/// HTTPS server settings from the `server` block of `harness.json5`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerConfig {
+    /// Bind address. Defaults to `127.0.0.1`.
+    pub host: String,
+    /// HTTPS port. Defaults to `4067`.
+    pub port: u16,
+    /// Idle timeout in minutes before the server exits.
+    pub live_timeout_minutes: u64,
+    /// Timeout in minutes for a pending user interaction.
+    pub interaction_timeout_minutes: u64,
+    /// Allowed CORS origins. Empty = CORS disabled; `"*"` is not supported.
+    pub cors_allowed_origins: Vec<String>,
+    /// Optional path to a PEM TLS certificate. `None` = auto-generate.
+    pub tls_cert: Option<PathBuf>,
+    /// Optional path to a PEM TLS private key. `None` = auto-generate.
+    pub tls_key: Option<PathBuf>,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 4067,
+            live_timeout_minutes: 5,
+            interaction_timeout_minutes: 10,
+            cors_allowed_origins: Vec::new(),
+            tls_cert: None,
+            tls_key: None,
+        }
+    }
+}
+
+/// Where a run should take its agent model from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentSource {
+    /// A single agent json5 file. Existence is checked during server load.
+    File {
+        /// Absolute path to the agent file.
+        path: PathBuf,
+    },
+    /// A directory with zero or more scanned agent candidates.
+    Directory {
+        /// Absolute path to the scanned directory.
+        path: PathBuf,
+        /// Valid candidates found in the directory (unsorted by path).
+        candidates: Vec<AgentCandidate>,
+    },
+}
+
+/// Session limits and interaction mode from the `agent` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentSession {
+    /// Limit confirmation mode.
+    pub mode: Mode,
+    /// Session token limit (`-1` = unlimited).
+    pub token_limit: i64,
+    /// Session iteration limit (`-1` = unlimited).
+    pub iteration_limit: i64,
+    /// Session USD limit (`-1` = unlimited).
+    pub usd_limit: f64,
+    /// Relative log folder inside `cwd`.
+    pub log_folder: String,
+}
+
+/// Partially loaded server configuration: everything except the chosen agent.
+#[derive(Debug, Clone)]
+pub struct ServerSettings {
+    /// Agent workspace (`cwd` in json5).
+    pub cwd: PathBuf,
+    /// Directory of the loaded `--conf` file.
+    pub conf_dir: PathBuf,
+    /// HTTPS server settings.
+    pub server: ServerConfig,
+    /// Where to resolve the concrete agent from at `POST /run`.
+    pub agent_source: AgentSource,
+    /// Session limits / mode / log folder from the `agent` block.
+    pub agent_session: AgentSession,
+    /// Enabled tool modules.
+    pub tools: ToolsSettings,
+    /// Conf JSON after vars substitution (before an agent is resolved).
+    pub source: serde_json::Value,
+}
+
+/// Result of [`crate::load_server_config`].
+#[derive(Debug, Clone)]
+pub enum ServerConfigState {
+    /// Configuration is valid and partially loaded.
+    Ok(ServerSettings),
+    /// Configuration file does not exist.
+    Missing,
+    /// Configuration exists but could not be read, parsed or validated.
+    Invalid {
+        /// Human-readable validation error.
+        message: String,
+    },
+}
+
+/// Fully resolved agent returned by [`crate::resolve_agent_for_run`].
+#[derive(Debug, Clone)]
+pub struct ResolvedAgent {
+    /// Fully loaded agent settings, including resolved API key.
+    pub agent: AgentSettings,
+    /// Absolute path of the agent json5 file that was loaded.
+    pub config_path: PathBuf,
+}
+
 /// Fully resolved harness configuration.
 #[derive(Debug, Clone)]
 pub struct Settings {
