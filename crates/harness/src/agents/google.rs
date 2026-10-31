@@ -130,12 +130,12 @@ impl GoogleAgent {
                 .log_line(&format!("{}. {}({log_arg})", i + 1, fc.name));
             let result = invoke_tool(&self.tools, &self.logger, &fc.name, fc.args.clone());
             if result.starts_with("execution error:") {
-                self.logger.log_str(&format!(" → fail → {result}"));
+                self.logger.log_str(&format!(" → fail → {result}"), false);
             } else {
-                self.logger.log_str(" → success");
+                self.logger.log_str(" → success", false);
                 if fc.name == "read_file" || fc.name == "write_file" {
                     self.logger
-                        .log_str(&format!(" → read/write {}symbols", result.len()));
+                        .log_str(&format!(" → read/write {}symbols", result.len()), false);
                 } else {
                     self.logger.log_line("```");
                     self.logger.log_line(&result);

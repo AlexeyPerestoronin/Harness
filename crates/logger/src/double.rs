@@ -1,4 +1,7 @@
-//! [`DoubleLogger`]: every record is written to stdout and to the session `log.md`.
+//! [`DoubleLogger`]: stdout + session `log.md` sink.
+//!
+//! Kept temporarily so the legacy `harness` binary keeps compiling. New code
+//! should use [`crate::FileLogger`] or [`crate::NullLogger`].
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -7,8 +10,8 @@ use std::sync::Mutex;
 
 use crate::Logger;
 
-/// Logger that mirrors Python `DoubleLogger`: touch the file, then append
-/// every record to both stdout and the file.
+/// Logger that mirrors Python `DoubleLogger`: every record is written to
+/// stdout and to the session log file.
 pub struct DoubleLogger {
     file: Mutex<File>,
 }
@@ -32,23 +35,17 @@ impl DoubleLogger {
 }
 
 impl Logger for DoubleLogger {
-    fn log_str(&self, message: &str) {
-        print!("{message}");
+    fn log_str(&self, message: &str, new_line: bool) {
+        let text = if new_line && !message.starts_with('\n') {
+            format!("\n{message}")
+        } else {
+            message.to_string()
+        };
+        print!("{text}");
         let _ = std::io::stdout().flush();
         if let Ok(mut file) = self.file.lock() {
-            let _ = file.write_all(message.as_bytes());
+            let _ = file.write_all(text.as_bytes());
             let _ = file.flush();
         }
-    }
-
-    fn log_line(&self, message: &str) {
-        let owned;
-        let text = if message.starts_with('\n') {
-            message
-        } else {
-            owned = format!("\n{message}");
-            owned.as_str()
-        };
-        self.log_str(text);
     }
 }

@@ -287,13 +287,13 @@ impl VendorRequest {
                     match RetryAction::from_status(status) {
                         RetryAction::Success => return Ok(body),
                         RetryAction::WaitAndRetry => {
-                            self.logger.log_str(" fail 429: model limit exceeded!");
+                            self.logger.log_str(" fail 429: model limit exceeded!", false);
                             last_err = "fail 429: model limit exceeded!".into();
                         }
                         RetryAction::SleepRandomAndRetry => {
                             let delay_secs = rand::thread_rng().gen_range(5..=20);
                             self.logger
-                                .log_str(&format!(" fail 503: waiting {delay_secs}s..."));
+                                .log_str(&format!(" fail 503: waiting {delay_secs}s..."), false);
                             clock.sleep(Duration::from_secs(delay_secs));
                             last_err = "fail 503".into();
                         }

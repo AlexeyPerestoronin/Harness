@@ -1,0 +1,13 @@
+[package]
+name = "interactions"
+version.workspace = true
+edition.workspace = true
+description = "Unified Interaction contract and CLI implementation over the Logger contract."
+
+[dependencies]
+# File sink used only when `write_log = true`; kept behind the Logger contract.
+logger = { path = "../logger" }
+# Async trait for the Interaction contract.
+async-trait = "0.1"
+# `spawn_blocking` for stdin reads and the async test runtime.
+tokio = { version = "1", features = ["rt", "macros"] }

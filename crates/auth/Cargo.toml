@@ -1,0 +1,16 @@
+[package]
+name = "auth"
+version.workspace = true
+edition.workspace = true
+description = "Bearer token generation, constant-time verification and axum auth middleware."
+
+[dependencies]
+# HTTP layer types and Json responses used by the middleware.
+axum = "0.8"
+# base64url without padding for bearer token encoding.
+base64 = "0.22"
+# Random 32-byte token generation.
+rand = "0.8"
+# JSON body serialization for 401 responses.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
