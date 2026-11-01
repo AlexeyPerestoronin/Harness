@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = ["crates/web-harness"]
 
 [workspace.package]
 version = "1.5.0"

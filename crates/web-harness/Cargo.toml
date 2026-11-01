@@ -1,0 +1,60 @@
+[package]
+name = "web-harness"
+version = "1.5.0"
+edition = "2021"
+description = "Leptos CSR web client for harness.exe --serve and embeddable HarnessPanel component."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "web-harness"
+path = "src/main.rs"
+
+# Self-contained workspace: Trunk builds this crate from its own directory.
+[workspace]
+
+[features]
+default = []
+fs-panel = []
+
+[dependencies]
+# Shared REST DTOs for the server and this WASM client.
+harness-api = { path = "../harness-api" }
+
+# Reactive CSR UI framework (pure Rust, no SSR/hydration needed).
+leptos = { version = "0.7", features = ["csr"] }
+
+# Browser fetch API used by HarnessGateway.
+gloo-net = { version = "0.6", default-features = false, features = ["http"] }
+
+# Timer futures for the 10s polling interval and the 10s fetch timeout race.
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# Spawn local tasks in the browser.
+wasm-bindgen-futures = "0.4"
+
+# Browser APIs: DOM, URL, localStorage, clipboard and keyboard events.
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Location",
+    "Storage",
+    "UrlSearchParams",
+    "Navigator",
+    "Clipboard",
+    "KeyboardEvent",
+    "EventTarget",
+    "HtmlInputElement",
+    "HtmlTextAreaElement",
+] }
+js-sys = "0.3"
+
+# JSON serialization for REST request/response bodies.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Future selection used to implement per-fetch timeout.
+futures = "0.3"
+
+# Better browser panic diagnostics for the standalone binary.
+console_error_panic_hook = "0.1"
