@@ -1,0 +1,3 @@
+[build]
+target = "crates/web-harness/index.html"
+dist = "crates/web-harness/dist"
