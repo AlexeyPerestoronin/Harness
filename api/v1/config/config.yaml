@@ -1,0 +1,47 @@
+config:
+  get:
+    summary: Read redacted server configuration
+    responses:
+      '200':
+        description: Configuration state
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ConfigResponse'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+  put:
+    summary: Validate and save server configuration
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/PutConfigRequest'
+    responses:
+      '200':
+        description: Configuration saved
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/PutConfigResponse'
+      '400':
+        description: Configuration validation failed
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ConfigInvalidResponse'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+default:
+  post:
+    summary: Create default configuration if missing
+    responses:
+      '200':
+        description: Default or current configuration
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ConfigDefaultResponse'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'

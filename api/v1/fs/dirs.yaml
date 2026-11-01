@@ -1,0 +1,79 @@
+list:
+  get:
+    summary: List a directory inside cwd
+    parameters:
+      - name: path
+        in: query
+        required: false
+        description: Relative path; empty means cwd root
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Directory entries
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FsListResponse'
+      '400':
+        $ref: '../components/responses.yaml#/BadRequest'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+      '403':
+        $ref: '../components/responses.yaml#/Forbidden'
+      '404':
+        $ref: '../components/responses.yaml#/NotFound'
+      '412':
+        $ref: '../components/responses.yaml#/PreconditionFailed'
+mkdir:
+  post:
+    summary: Create a directory inside cwd
+    parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Directory created or already exists
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FsMkdirResponse'
+      '400':
+        $ref: '../components/responses.yaml#/BadRequest'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+      '403':
+        $ref: '../components/responses.yaml#/Forbidden'
+      '412':
+        $ref: '../components/responses.yaml#/PreconditionFailed'
+remove:
+  delete:
+    summary: Remove a file or empty directory inside cwd
+    parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Entry removed
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FsRemoveResponse'
+      '400':
+        $ref: '../components/responses.yaml#/BadRequest'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+      '403':
+        $ref: '../components/responses.yaml#/Forbidden'
+      '404':
+        $ref: '../components/responses.yaml#/NotFound'
+      '409':
+        $ref: '../components/responses.yaml#/Conflict'
+      '412':
+        $ref: '../components/responses.yaml#/PreconditionFailed'

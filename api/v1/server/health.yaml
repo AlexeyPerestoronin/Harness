@@ -1,0 +1,10 @@
+get:
+  summary: Public server health and state
+  security: []
+  responses:
+    '200':
+      description: Server is reachable
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/HealthResponse'

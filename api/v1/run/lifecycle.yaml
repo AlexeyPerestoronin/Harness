@@ -1,0 +1,84 @@
+start:
+  post:
+    summary: Start a run
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/StartRunRequest'
+    responses:
+      '202':
+        description: Run started
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/StartRunResponse'
+      '400':
+        $ref: '../components/responses.yaml#/BadRequest'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+      '409':
+        $ref: '../components/responses.yaml#/Conflict'
+      '412':
+        $ref: '../components/responses.yaml#/PreconditionFailed'
+current:
+  get:
+    summary: Poll current/last run state
+    responses:
+      '200':
+        description: Current run state
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunStatusResponse'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+stop:
+  post:
+    summary: Stop the current run
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/StopRunRequest'
+    responses:
+      '200':
+        description: No active run
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunStateResponse'
+      '202':
+        description: Stop accepted
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunStateResponse'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+input:
+  post:
+    summary: Answer a pending input
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/SubmitInputRequest'
+    responses:
+      '202':
+        description: Answer accepted
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/SubmitInputResponse'
+      '400':
+        $ref: '../components/responses.yaml#/BadRequest'
+      '401':
+        $ref: '../components/responses.yaml#/Unauthorized'
+      '404':
+        $ref: '../components/responses.yaml#/NotFound'
+      '409':
+        $ref: '../components/responses.yaml#/Conflict'

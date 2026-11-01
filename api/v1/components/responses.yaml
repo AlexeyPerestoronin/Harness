@@ -1,0 +1,36 @@
+BadRequest:
+  description: Invalid request or validation error
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ErrorResponse'
+Unauthorized:
+  description: Missing, invalid or incorrectly formed bearer token
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ErrorResponse'
+Forbidden:
+  description: Path protected by the FS deny-list
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ErrorResponse'
+NotFound:
+  description: Resource not found
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ErrorResponse'
+Conflict:
+  description: State conflict
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ErrorResponse'
+PreconditionFailed:
+  description: Configuration missing or invalid
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ErrorResponse'

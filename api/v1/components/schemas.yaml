@@ -1,0 +1,275 @@
+ErrorBody:
+  type: object
+  required: [code, message]
+  properties:
+    code:
+      type: string
+    message:
+      type: string
+ErrorResponse:
+  type: object
+  required: [error]
+  properties:
+    error:
+      $ref: '#/ErrorBody'
+ConfigState:
+  type: string
+  enum: [ok, missing, invalid]
+RunState:
+  type: string
+  enum: [idle, running, waitingInput, stopping, finished, failed, stopped]
+HealthResponse:
+  type: object
+  required: [status, version, serverTime, authRequired, runState, configState]
+  properties:
+    status:
+      type: string
+    version:
+      type: string
+    serverTime:
+      type: string
+      format: date-time
+    authRequired:
+      type: boolean
+    runState:
+      $ref: '#/RunState'
+    configState:
+      $ref: '#/ConfigState'
+StartRunRequest:
+  type: object
+  required: [prompt]
+  properties:
+    prompt:
+      type: string
+StartRunResponse:
+  type: object
+  required: [runState, runUrl]
+  properties:
+    runState:
+      $ref: '#/RunState'
+    runUrl:
+      type: string
+RunSummary:
+  type: object
+  required: [iteration, tokens, usdApprox, usdReal]
+  properties:
+    iteration:
+      type: integer
+    tokens:
+      type: integer
+    usdApprox:
+      type: number
+    usdReal:
+      type: number
+      nullable: true
+PendingInputKind:
+  type: string
+  enum: [text, confirm]
+PendingInput:
+  type: object
+  required: [requestId, kind, prompt, timeoutAt, sensitive]
+  properties:
+    requestId:
+      type: string
+    kind:
+      $ref: '#/PendingInputKind'
+    prompt:
+      type: string
+    timeoutAt:
+      type: string
+      format: date-time
+    sensitive:
+      type: boolean
+      default: false
+RunStats:
+  type: object
+  required: [iteration, tokens, usdApprox, usdReal]
+  properties:
+    iteration:
+      type: integer
+    tokens:
+      type: integer
+    usdApprox:
+      type: number
+    usdReal:
+      type: number
+      nullable: true
+RunResult:
+  type: object
+  required: [ok, runState, stats, error]
+  properties:
+    ok:
+      type: boolean
+    runState:
+      $ref: '#/RunState'
+    stats:
+      $ref: '#/RunStats'
+    error:
+      type: string
+      nullable: true
+RunStatusResponse:
+  type: object
+  required: [runState]
+  properties:
+    runState:
+      $ref: '#/RunState'
+    startedAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    summary:
+      $ref: '#/RunSummary'
+    pendingInput:
+      $ref: '#/PendingInput'
+    result:
+      $ref: '#/RunResult'
+StopRunRequest:
+  type: object
+  properties:
+    reason:
+      type: string
+SubmitInputRequest:
+  type: object
+  required: [requestId, answer]
+  properties:
+    requestId:
+      type: string
+    answer:
+      type: string
+SubmitInputResponse:
+  type: object
+  required: [accepted]
+  properties:
+    accepted:
+      type: boolean
+RunStateResponse:
+  type: object
+  required: [runState]
+  properties:
+    runState:
+      $ref: '#/RunState'
+ConfigResponse:
+  type: object
+  required: [path, exists, text, valid, validationError]
+  properties:
+    path:
+      type: string
+    exists:
+      type: boolean
+    text:
+      type: string
+      nullable: true
+    valid:
+      type: boolean
+    validationError:
+      type: string
+      nullable: true
+PutConfigRequest:
+  type: object
+  required: [text]
+  properties:
+    text:
+      type: string
+PutConfigResponse:
+  type: object
+  required: [ok]
+  properties:
+    ok:
+      type: boolean
+    path:
+      type: string
+    valid:
+      type: boolean
+    error:
+      $ref: '#/ErrorBody'
+ConfigInvalidResponse:
+  type: object
+  required: [ok, error]
+  properties:
+    ok:
+      type: boolean
+    error:
+      $ref: '#/ErrorBody'
+ConfigDefaultResponse:
+  type: object
+  required: [path, exists, text, valid]
+  properties:
+    path:
+      type: string
+    exists:
+      type: boolean
+    text:
+      type: string
+    valid:
+      type: boolean
+FsEntry:
+  type: object
+  required: [name, kind, size]
+  properties:
+    name:
+      type: string
+    kind:
+      type: string
+      enum: [file, dir]
+    size:
+      type: integer
+FsListResponse:
+  type: object
+  required: [path, entries]
+  properties:
+    path:
+      type: string
+    entries:
+      type: array
+      items:
+        $ref: '#/FsEntry'
+FsReadResponse:
+  type: object
+  required: [path, text]
+  properties:
+    path:
+      type: string
+    text:
+      type: string
+FsWriteRequest:
+  type: object
+  required: [text]
+  properties:
+    text:
+      type: string
+FsWriteResponse:
+  type: object
+  required: [ok, path]
+  properties:
+    ok:
+      type: boolean
+    path:
+      type: string
+FsMkdirResponse:
+  type: object
+  required: [ok, path]
+  properties:
+    ok:
+      type: boolean
+    path:
+      type: string
+FsRemoveResponse:
+  type: object
+  required: [ok, path]
+  properties:
+    ok:
+      type: boolean
+    path:
+      type: string
+FsMoveResponse:
+  type: object
+  required: [ok, src, dst]
+  properties:
+    ok:
+      type: boolean
+    src:
+      type: string
+    dst:
+      type: string
