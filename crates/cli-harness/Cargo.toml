@@ -7,7 +7,7 @@ description = "Console harness.exe: CLI and asynchronous agent loop."
 [dependencies]
 # Load and validate harness.json5 / model files; generate --conf-new templates.
 conf = { path = "../conf" }
-# Session log sink used by CliInteraction.
+# Session log sink used by CliInteraction and WebInteraction.
 logger = { path = "../logger" }
 # Unified Interaction contract and CliInteraction implementation.
 interactions = { path = "../interactions" }
@@ -15,8 +15,27 @@ interactions = { path = "../interactions" }
 tools = { path = "../tools" }
 # Asynchronous agent loop, agents, request pipeline and dump helpers.
 agent-loop = { path = "../agent-loop" }
-# JSON for dump settings and API-key file handling.
+# Shared REST DTOs for the HTTPS server.
+harness-api = { path = "../harness-api" }
+# Bearer token generation, parsing and axum auth middleware.
+auth = { path = "../auth" }
+# HTTPS REST server.
+axum = "0.8"
+# TLS termination for axum with rustls.
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+# Self-signed certificate generation for the first server start.
+rcgen = "0.13"
+# ULID request ids for pending input (`req_` + 26 chars).
+ulid = "1"
+# ISO-8601 timestamps for health and run status.
+chrono = "0.4"
+# Async trait implementations for Interaction and RunObserver.
+async-trait = "0.1"
 serde_json = "1"
-# Async runtime for the CLI entry point.
+# Async runtime for the CLI entry point and the server.
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tokio-util = "0.7"
+
+[dev-dependencies]
+# Router oneshot tests.
+tower = { version = "0.5", features = ["util"] }

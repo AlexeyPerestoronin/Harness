@@ -4,6 +4,7 @@
 //! opened only inside `conf`; this binary receives typed settings.
 
 mod cli;
+mod server;
 
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
@@ -42,6 +43,26 @@ async fn run() -> Result<(), String> {
             conf::write_new_conf(&path).map_err(|e| e.to_string())?;
             Ok(())
         }
+        CliAction::Serve {
+            conf,
+            cwd,
+            port,
+            host,
+            tls_cert,
+            tls_key,
+            auth_token,
+        } => {
+            server::serve(server::ServeOptions {
+                conf,
+                cwd,
+                port,
+                host,
+                tls_cert,
+                tls_key,
+                auth_token,
+            })
+            .await
+        }
         CliAction::Start {
             conf,
             prompt,
@@ -56,9 +77,7 @@ async fn run() -> Result<(), String> {
             };
             match (dump, conf) {
                 (Some(dump_path), _) => start_resume_session(dump_path, cwd, api_key).await,
-                (None, Some(conf_path)) => {
-                    start_new_session(conf_path, prompt, cwd, api_key).await
-                }
+                (None, Some(conf_path)) => start_new_session(conf_path, prompt, cwd, api_key).await,
                 (None, None) => Err("missing --conf".to_string()),
             }
         }
@@ -136,12 +155,9 @@ async fn start_resume_session(
 ) -> Result<(), String> {
     let settings_value = agent_loop::dump_settings::extract(&dump_path)?;
     let conf_dir = agent_loop::dump_settings::conf_dir_of(&settings_value)?;
-    let mut settings = conf::load_from_value(
-        settings_value,
-        &conf_dir,
-        cwd,
-        |_| Err("agent was not selected".to_string()),
-    )
+    let mut settings = conf::load_from_value(settings_value, &conf_dir, cwd, |_| {
+        Err("agent was not selected".to_string())
+    })
     .map_err(|e| e.to_string())?;
 
     if let Some(raw) = api_key {
@@ -174,7 +190,13 @@ async fn start_resume_session(
     )?;
     let mut loop_ = loop_.with_dump_settings(settings.source.clone());
     let outcome = loop_
-        .run(None, &dump_file, Some(&dump_path), CancellationToken::new(), None)
+        .run(
+            None,
+            &dump_file,
+            Some(&dump_path),
+            CancellationToken::new(),
+            None,
+        )
         .await?;
     handle_outcome(outcome)
 }
@@ -194,9 +216,12 @@ fn pre_session_interaction() -> Arc<dyn Interaction> {
 
 fn session_interaction(log_file: &Path) -> Result<Arc<dyn Interaction>, String> {
     let file: Arc<dyn Logger> = Arc::new(
-        FileLogger::new(log_file).map_err(|e| format!("cannot open log '{}': {e}", log_file.display()))?,
+        FileLogger::new(log_file)
+            .map_err(|e| format!("cannot open log '{}': {e}", log_file.display()))?,
     );
-    Ok(Arc::new(CliInteraction::new(InteractionLoggers::new(Some(file)))))
+    Ok(Arc::new(CliInteraction::new(InteractionLoggers::new(
+        Some(file),
+    ))))
 }
 
 async fn resolve_agent_for_run_interactive(
@@ -206,19 +231,13 @@ async fn resolve_agent_for_run_interactive(
 ) -> Result<conf::ResolvedAgent, String> {
     let mut choice: Option<String> = None;
     loop {
-        match conf::resolve_agent_for_run(
-            settings,
-            choice.as_deref(),
-            api_key_override.as_deref(),
-        ) {
+        match conf::resolve_agent_for_run(settings, choice.as_deref(), api_key_override.as_deref())
+        {
             Ok(resolved) => {
                 if resolved.agent.api_key.is_empty() && api_key_override.is_none() {
-                    let key = prompt_api_key(
-                        interaction,
-                        &resolved.agent.vendor,
-                        &resolved.agent.name,
-                    )
-                    .await?;
+                    let key =
+                        prompt_api_key(interaction, &resolved.agent.vendor, &resolved.agent.name)
+                            .await?;
                     api_key_override = Some(key);
                     continue;
                 }
@@ -229,8 +248,7 @@ async fn resolve_agent_for_run_interactive(
                     conf::ConfErrorKind::AgentChoiceRequired(candidates) => candidates.clone(),
                     _ => return Err(e.to_string()),
                 };
-                let index =
-                    agent_loop::agent_select::choose(interaction, &candidates).await?;
+                let index = agent_loop::agent_select::choose(interaction, &candidates).await?;
                 choice = Some((index + 1).to_string());
             }
             Err(e) => return Err(e.to_string()),
@@ -344,10 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_key_prompt_does_not_write_key_to_log() {
-        let dir = std::env::temp_dir().join(format!(
-            "harness-cli-key-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("harness-cli-key-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let log_path = dir.join("log.md");
         let file: Arc<dyn Logger> = Arc::new(FileLogger::new(&log_path).unwrap());
@@ -358,7 +373,9 @@ mod tests {
             writer,
         ));
 
-        let key = prompt_api_key(&interaction, "Vendor", "Model").await.unwrap();
+        let key = prompt_api_key(&interaction, "Vendor", "Model")
+            .await
+            .unwrap();
         assert_eq!(key, "secret-key");
 
         let logged = std::fs::read_to_string(&log_path).unwrap_or_default();

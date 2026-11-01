@@ -1,13 +1,19 @@
-harness.exe — native agent loop.
+harness.exe — native agent loop and HTTPS server.
 
 USAGE:
     harness.exe --help
     harness.exe --help-tools
     harness.exe --version
+    harness.exe [--serve] [--host <addr>] [--port <port>] [--conf <path>] [--cwd <path>]
+                [--tls-cert <path> --tls-key <path>] [--auth-token <token>]
     harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt "<user prompt>"
     harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt-file <path to prompt file>
     harness.exe [--cwd <path>] [--api-key <key>] --dump "<path to dump file>"
     harness.exe --conf-new "<path to new conf file>"
+
+DESCRIPTION:
+    Without arguments (or with --serve) harness starts an HTTPS server.
+    With --prompt / --prompt-file / --dump it runs a console agent session.
 
 FLAGS:
     --help
@@ -19,38 +25,60 @@ FLAGS:
     --version
         Print the application version and exit with code 0.
 
+    --serve
+        Start the HTTPS server. This is the default mode when no other mode
+        flag is present. Cannot be combined with --prompt, --prompt-file,
+        --dump or --conf-new.
+
+    --host <addr>
+        Bind address for the HTTPS server. Default: 127.0.0.1.
+        Only valid with --serve.
+
+    --port <port>
+        HTTPS port in range 1..=65535. Priority: --port, then server.port
+        from harness.json5, then 4067. Only valid with --serve.
+
+    --tls-cert <path> --tls-key <path>
+        Use user-supplied PEM TLS certificate and private key instead of
+        auto-generating a self-signed certificate. Both flags are required
+        together and only valid with --serve.
+
+    --auth-token <token>
+        Fixed Bearer token for protected API routes. When omitted, a random
+        token is generated and printed to stdout. Only valid with --serve.
+
     --conf <path>
         Path to harness.json5. Optional. Default: <process-cwd>/harness.json5
-        (the current working directory of the process, not settings.cwd).
+        for console sessions and <cwd>/harness.json5 for the server.
         Inside it, agent.config may be an agent file or a folder
         of agent files (you will be asked to choose).
         Cannot be combined with --conf-new or --dump.
 
+    --cwd <path>
+        Workspace root override. Overrides 'cwd' from harness.json5 (or dump).
+        A relative path is resolved against the directory of the working conf file:
+        parent(--conf) for a new session/server, the directory of the dump settings for --dump.
+        The final value is absolute and normalized.
+
     --prompt "<user prompt>"
-        Start a new session with this user prompt.
+        Start a new console session with this user prompt.
 
     --prompt-file <path>
-        Start a new session; the user prompt is read from the file (UTF-8).
+        Start a new console session; the user prompt is read from the file (UTF-8).
 
     --dump "<path to dump file>"
-        Continue a session from a dump file. The prompt is taken from dump
+        Continue a console session from a dump file. The prompt is taken from dump
         history; --prompt is not used.
         Configuration is taken from the dump file; --conf cannot be used
         with --dump.
 
-    --cwd <path>
-        Workspace root override. Overrides 'cwd' from harness.json5 (or dump).
-        A relative path is resolved against the directory of the working conf file:
-        parent(--conf) for a new session, the directory of the dump settings for --dump.
-        The final value is absolute and normalized.
-        Can only be used with --prompt, --prompt-file or --dump.
-
     --api-key <key>
-        API-key override. A literal key or a path to a UTF-8 file whose trimmed
-        contents are the key. A relative file path is resolved against the final cwd.
-        Overrides any api-key from the model file. If no key is configured and this
-        flag is absent, harness asks for the key in the console.
-        Can only be used with --prompt, --prompt-file or --dump.
+        API-key override for a console session. A literal key or a path to a
+        UTF-8 file whose trimmed contents are the key. A relative file path is
+        resolved against the final cwd. Overrides any api-key from the model
+        file. If no key is configured and this flag is absent, harness asks
+        for the key in the console. Only valid with --prompt, --prompt-file
+        or --dump.
 
     --conf-new "<path to new conf file>"
         Write a full commented JSON5 template to the path and exit.
@@ -59,5 +87,7 @@ FLAGS:
 
 RULES:
     --prompt, --prompt-file, --dump and --conf-new are mutually exclusive.
-    One of --prompt, --prompt-file, --dump or --conf-new is required.
+    One of --prompt, --prompt-file, --dump, --conf-new or --serve is required
+    (no arguments also starts the server).
     --conf cannot be used with --dump (configuration is taken from the dump file).
+    --port, --host, --tls-cert, --tls-key and --auth-token are only valid with --serve.
