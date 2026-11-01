@@ -7,6 +7,18 @@
 
 Агентский цикл: code-reviewer.md (составление плана рефакторинга) → senior-developer.md (исполнение плана рефакторинга)
 
+## Bug with request time-counter
+После изменений request time-counter работает не правильно: в console лог-output агентской сессии при ожидании запроса счётчик не отмеряет секунды до ожидания ответа, а показывает всегда 0min 0sec (либо 0min 1sec):
+```txt
+## Iteration №4
+Usage:
+- time = 0 min 9 sec
+- tokens = 5454
+- USD approximated = 0.004468
+response waiting time: 0 min 0 sec response
+```
+> вообще выглядит так, словно таймер отсчитывается но выводится в консоль некорректно из-за того, что весь стек теперь асинхронный.
+
 ## harness.json5 first
 `harness.exe` всегда должен описать на какой-то файл конфигурации в любом из режимов работы → если не задан `--conf` и в CWD не лежит `harness.json5` то, необходимо создать `harness.json5`-по-умолчанию в CWD и загрузить уже его.
 
