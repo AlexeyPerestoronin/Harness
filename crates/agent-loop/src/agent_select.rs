@@ -1,57 +1,18 @@
-//! Interactive choice of an agent file when `agent.config` is a directory.
+//! Prompt and answer parsing for an interactive agent choice.
 //!
-//! `conf` only scans and loads; this module talks to the [`Interaction`]
-//! contract. The prompt table keeps the old console format (`№`, `Vendor`,
-//! `Model`, `Cost`, `Limits`) and parses a 1-based number.
+//! When `agent.config` is a directory with several candidates the caller
+//! renders a selection prompt through [`build_prompt`] and parses the 1-based
+//! answer with [`parse_choice`]. The interaction loop itself lives in
+//! `cli-harness` so console and server runs share the same behaviour. The
+//! prompt table keeps the legacy console format (`№`, `Vendor`, `Model`,
+//! `Cost`, `Limits`).
 
 use std::path::Path;
-use std::sync::Arc;
 
 use conf::AgentCandidate;
-use interactions::{Interaction, InteractionKind, InteractionRequest};
 
 /// Maximum number of invalid selection answers before failing.
 pub const MAX_ATTEMPTS: u32 = 3;
-
-/// Ask the user to pick a candidate. Returns a 0-based index.
-pub async fn choose(
-    interaction: &Arc<dyn Interaction>,
-    candidates: &[AgentCandidate],
-) -> Result<usize, String> {
-    if candidates.is_empty() {
-        return Err("agent was not selected".into());
-    }
-    if candidates.len() == 1 {
-        let c = &candidates[0];
-        let line = format!(
-            "Agent: {} {} ({})",
-            c.vendor,
-            c.name,
-            file_name(&c.path)
-        );
-        let _ = interaction
-            .output(&line, true, interactions::OutputType::NewLine)
-            .await;
-        return Ok(0);
-    }
-
-    let prompt = build_prompt(candidates);
-    for _ in 0..MAX_ATTEMPTS {
-        let request = InteractionRequest {
-            kind: InteractionKind::Text,
-            prompt: prompt.clone(),
-            sensitive: false,
-        };
-        let answer = interaction
-            .input(&request, true)
-            .await
-            .map_err(|e| format!("cannot select agent → {e}"))?;
-        if let Some(index) = parse_choice(answer.trim(), candidates.len()) {
-            return Ok(index);
-        }
-    }
-    Err("agent was not selected".into())
-}
 
 /// Build the selection prompt with the legacy table layout.
 pub fn build_prompt(candidates: &[AgentCandidate]) -> String {
@@ -109,12 +70,6 @@ pub fn parse_choice(input: &str, candidates_len: usize) -> Option<usize> {
     }
 }
 
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
 fn render_table_row(cells: &[String], widths: &[usize]) -> String {
     let mut row = String::from("|");
     for (cell, width) in cells.iter().zip(widths) {
@@ -169,21 +124,6 @@ fn format_price(value: f64) -> String {
 mod tests {
     use super::*;
 
-    fn candidate(index: u8) -> AgentCandidate {
-        AgentCandidate {
-            path: Path::new("/tmp/agents").join(format!("agent-{index}.json5")),
-            vendor: format!("Vendor{index}"),
-            name: format!("Model{index}"),
-            token_limit: 1000,
-            rpm: -1,
-            tpm: -1,
-            rpd: -1,
-            input_price: -1.0,
-            output_price: -1.0,
-            cached_price: -1.0,
-        }
-    }
-
     #[test]
     fn parse_choice_accepts_one_based_numbers() {
         assert_eq!(parse_choice("1", 3), Some(0));
@@ -196,47 +136,5 @@ mod tests {
         assert_eq!(parse_choice("0", 3), None);
         assert_eq!(parse_choice("4", 3), None);
         assert_eq!(parse_choice("abc", 3), None);
-    }
-
-    #[tokio::test]
-    async fn choose_exhausts_attempts() {
-        use interactions::{InteractionError, OutputType};
-        use std::sync::Mutex;
-
-        #[derive(Clone)]
-        struct MockInteraction {
-            answers: Arc<Mutex<Vec<String>>>,
-        }
-
-        #[async_trait::async_trait]
-        impl Interaction for MockInteraction {
-            async fn input(
-                &self,
-                _request: &InteractionRequest,
-                _write_log: bool,
-            ) -> Result<String, InteractionError> {
-                Ok(self.answers.lock().unwrap().remove(0))
-            }
-
-            async fn output(
-                &self,
-                _message: &str,
-                _write_log: bool,
-                _new_line: OutputType,
-            ) -> Result<(), InteractionError> {
-                Ok(())
-            }
-        }
-
-        let interaction: Arc<dyn Interaction> = Arc::new(MockInteraction {
-            answers: Arc::new(Mutex::new(vec![
-                "0".to_string(),
-                "99".to_string(),
-                "abc".to_string(),
-            ])),
-        });
-        let candidates = vec![candidate(1), candidate(2)];
-        let result = choose(&interaction, &candidates).await;
-        assert_eq!(result.unwrap_err(), "agent was not selected");
     }
 }

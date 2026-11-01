@@ -15,7 +15,7 @@ pub mod tls;
 pub mod web_interaction;
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,6 +24,7 @@ use conf::ServerConfigState;
 use harness_api::ConfigState;
 use tokio::sync::{Mutex, RwLock};
 
+use crate::session;
 use self::state::{LoadedServerConfig, ServerState};
 
 /// Server-mode options produced by [`crate::cli::parse_args`].
@@ -73,7 +74,7 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| PathBuf::from("."))
             });
-        let cwd = resolve_cwd_override(&raw, &conf_dir)?;
+        let cwd = session::resolve_cwd_override(&raw, &conf_dir)?;
         if let Some(settings) = settings.as_mut() {
             settings.cwd = cwd;
         }
@@ -245,46 +246,7 @@ fn resolve_conf_path(raw: &Path) -> Result<PathBuf, String> {
             .map_err(|e| e.to_string())?
             .join(raw)
     };
-    normalize_abs(&absolute)
-}
-
-fn resolve_cwd_override(raw: &Path, conf_dir: &Path) -> Result<PathBuf, String> {
-    let base = if conf_dir.is_absolute() {
-        conf_dir.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| e.to_string())?
-            .join(conf_dir)
-    };
-    let absolute = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        base.join(raw)
-    };
-    normalize_abs(&absolute)
-}
-
-fn normalize_abs(path: &Path) -> Result<PathBuf, String> {
-    if !path.is_absolute() {
-        return Err("path must be an absolute path".to_string());
-    }
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Normal(name) => normalized.push(name),
-        }
-    }
-    if normalized.as_os_str().is_empty() {
-        Err("path must be set explicitly".to_string())
-    } else {
-        Ok(normalized)
-    }
+    session::normalize_abs(&absolute)
 }
 
 #[cfg(test)]

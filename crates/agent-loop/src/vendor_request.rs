@@ -369,8 +369,9 @@ impl WaitingAction {
 impl DurAction for WaitingAction {
     async fn execute(&self, ctx: &PipelineContext) -> Result<(), PipelineError> {
         let text = format!(
-            "response waiting time: {}",
-            format_waiting_time(ctx.started_at.elapsed().as_secs())
+            "response waiting time: {}{}",
+            format_waiting_time(ctx.started_at.elapsed().as_secs()),
+            "          " // 10 spaces for override tail
         );
         self.interaction
             .output(&text, false, OutputType::RewriteLine)
