@@ -114,8 +114,13 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
     });
 
     let tls_paths = tls::resolve_tls_paths(&server)?;
+
+    print_startup_info(&state, &server, &tls_paths).await;
+
     let app = handlers::router(state.clone());
-    let addr = resolve_addr(&server.host, server.port).await?;
+    let initial_addr = resolve_addr(&server.host, server.port).await?;
+    let addr = find_free_port(initial_addr.ip(), server.port).await?;
+    println!("listening on https://{}:{}", server.host, addr.port());
 
     tokio::spawn(live_timeout_task(state.clone()));
 
@@ -136,6 +141,64 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
         .serve(app.into_make_service())
         .await
         .map_err(|e| format!("server error: {e}"))
+}
+
+/// Print the server startup information before the live-timeout task and bind.
+async fn print_startup_info(
+    state: &Arc<ServerState>,
+    server: &conf::ServerConfig,
+    tls_paths: &tls::TlsPaths,
+) {
+    let config = state.config.read().await;
+    println!("{} (server mode)", crate::cli::version_line());
+    println!("conf: {}", config.path.display());
+    if let Some(settings) = &config.settings {
+        println!("cwd: {}", settings.cwd.display());
+    }
+    println!("host: {}", server.host);
+    println!("port: {}", server.port);
+    match (&server.tls_cert, &server.tls_key) {
+        (Some(cert), Some(key)) => {
+            println!("tls: cert={} key={}", cert.display(), key.display());
+        }
+        _ => {
+            let tls_dir = tls_paths
+                .cert
+                .parent()
+                .unwrap_or_else(|| tls_paths.cert.as_path());
+            println!("tls: auto-generated in {}", tls_dir.display());
+        }
+    }
+    println!("live-timeout: {}m", server.live_timeout_minutes);
+    println!("interaction-timeout: {}m", server.interaction_timeout_minutes);
+    if server.cors_allowed_origins.is_empty() {
+        println!("CORS disabled");
+    } else {
+        println!("CORS allowlist: {}", server.cors_allowed_origins.join(", "));
+    }
+}
+
+/// Find a free TCP port starting from `start_port` and return the bind address.
+async fn find_free_port(ip: IpAddr, start_port: u16) -> Result<SocketAddr, String> {
+    let mut port = start_port;
+    loop {
+        match tokio::net::TcpListener::bind(SocketAddr::new(ip, port)).await {
+            Ok(listener) => {
+                drop(listener);
+                if port != start_port {
+                    println!("selected free port {port}");
+                }
+                return Ok(SocketAddr::new(ip, port));
+            }
+            Err(_) if port == u16::MAX => {
+                return Err(format!("no free port found from {start_port} to 65535"));
+            }
+            Err(_) => {
+                println!("port {port} is already in use, trying {}...", port + 1);
+                port += 1;
+            }
+        }
+    }
 }
 
 async fn resolve_addr(host: &str, port: u16) -> Result<SocketAddr, String> {
@@ -221,5 +284,25 @@ fn normalize_abs(path: &Path) -> Result<PathBuf, String> {
         Err("path must be set explicitly".to_string())
     } else {
         Ok(normalized)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn find_free_port_skips_occupied_port() {
+        let occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let occupied_addr = occupied.local_addr().unwrap();
+        let ip = occupied_addr.ip();
+        let port = occupied_addr.port();
+        assert_ne!(port, u16::MAX, "test requires a non-max ephemeral port");
+
+        let selected = find_free_port(ip, port).await.unwrap();
+        assert_eq!(selected.ip(), ip);
+        assert!(selected.port() > port);
+
+        drop(occupied);
     }
 }
