@@ -5,8 +5,11 @@
 //! point. The actual HTTP contract is implemented in [`handlers`]; the
 //! asynchronous agent session is launched by [`run`].
 
+pub mod config;
+pub mod fs_api;
 pub mod handlers;
 pub mod run;
+mod secret;
 pub mod state;
 pub mod tls;
 pub mod web_interaction;
@@ -43,7 +46,8 @@ pub struct ServeOptions {
 
 /// Start the HTTPS server and block until it stops.
 pub async fn serve(options: ServeOptions) -> Result<(), String> {
-    let loaded = conf::load_server_config(&options.conf).map_err(|e| e.to_string())?;
+    let conf_path = resolve_conf_path(&options.conf)?;
+    let loaded = conf::load_server_config(&conf_path).map_err(|e| e.to_string())?;
     let (config_state, mut settings, mut server) = match loaded {
         ServerConfigState::Ok(settings) => {
             let server = settings.server.clone();
@@ -53,7 +57,7 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
         ServerConfigState::Invalid { message } => {
             eprintln!(
                 "warning: invalid configuration '{}': {message}",
-                options.conf.display()
+                conf_path.display()
             );
             (ConfigState::Invalid, None, conf::ServerConfig::default())
         }
@@ -64,8 +68,7 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
             .as_ref()
             .map(|s| s.conf_dir.clone())
             .unwrap_or_else(|| {
-                options
-                    .conf
+                conf_path
                     .parent()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| PathBuf::from("."))
@@ -99,7 +102,7 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
     let live_timeout = Duration::from_secs(server.live_timeout_minutes.saturating_mul(60));
     let state = Arc::new(ServerState {
         config: RwLock::new(LoadedServerConfig {
-            path: options.conf.clone(),
+            path: conf_path,
             config_state,
             settings,
             server: server.clone(),
@@ -171,6 +174,17 @@ async fn live_timeout_task(state: Arc<ServerState>) {
     }
 }
 
+fn resolve_conf_path(raw: &Path) -> Result<PathBuf, String> {
+    let absolute = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(raw)
+    };
+    normalize_abs(&absolute)
+}
+
 fn resolve_cwd_override(raw: &Path, conf_dir: &Path) -> Result<PathBuf, String> {
     let base = if conf_dir.is_absolute() {
         conf_dir.to_path_buf()
@@ -189,7 +203,7 @@ fn resolve_cwd_override(raw: &Path, conf_dir: &Path) -> Result<PathBuf, String> 
 
 fn normalize_abs(path: &Path) -> Result<PathBuf, String> {
     if !path.is_absolute() {
-        return Err("'cwd' must be an absolute path".to_string());
+        return Err("path must be an absolute path".to_string());
     }
     let mut normalized = PathBuf::new();
     for component in path.components() {
@@ -204,7 +218,7 @@ fn normalize_abs(path: &Path) -> Result<PathBuf, String> {
         }
     }
     if normalized.as_os_str().is_empty() {
-        Err("'cwd' must be set explicitly".to_string())
+        Err("path must be set explicitly".to_string())
     } else {
         Ok(normalized)
     }

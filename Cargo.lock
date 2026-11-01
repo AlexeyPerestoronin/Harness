@@ -244,6 +244,7 @@ dependencies = [
  "conf",
  "harness-api",
  "interactions",
+ "json5",
  "logger",
  "rcgen",
  "serde_json",

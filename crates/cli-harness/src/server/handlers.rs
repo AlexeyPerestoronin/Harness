@@ -11,7 +11,7 @@ use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{middleware, Json, Router};
 use chrono::{SecondsFormat, Utc};
 use harness_api::{
@@ -40,6 +40,18 @@ impl ApiError {
             code: code.into(),
             message: message.into(),
         }
+    }
+
+    /// HTTP status code carried by this error.
+    #[cfg(test)]
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    /// Stable machine-readable error code.
+    #[cfg(test)]
+    pub fn code(&self) -> &str {
+        &self.code
     }
 }
 
@@ -291,6 +303,17 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/api/v1/run/current", get(run_status))
         .route("/api/v1/run/stop", post(stop_run))
         .route("/api/v1/run/input", post(submit_input))
+        .route(
+            "/api/v1/config",
+            get(super::config::get_config).put(super::config::put_config),
+        )
+        .route("/api/v1/config/default", post(super::config::config_default))
+        .route("/api/v1/fs/list", get(super::fs_api::fs_list))
+        .route("/api/v1/fs/read", get(super::fs_api::fs_read))
+        .route("/api/v1/fs/write", put(super::fs_api::fs_write))
+        .route("/api/v1/fs/mkdir", post(super::fs_api::fs_mkdir))
+        .route("/api/v1/fs/remove", delete(super::fs_api::fs_remove))
+        .route("/api/v1/fs/move", post(super::fs_api::fs_move))
         .layer(middleware::from_fn_with_state(
             auth_token,
             auth::require_auth,

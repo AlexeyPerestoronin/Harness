@@ -34,6 +34,8 @@ chrono = "0.4"
 # Async trait implementations for Interaction and RunObserver.
 async-trait = "0.1"
 serde_json = "1"
+# Parse JSON5/JSON for FS redaction and the Config API merge rule.
+json5 = "0.4"
 # Async runtime for the CLI entry point and the server.
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tokio-util = "0.7"
