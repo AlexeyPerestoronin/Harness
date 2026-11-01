@@ -435,7 +435,7 @@ impl VendorRequest {
                 cancel: cancel.clone(),
             };
 
-            let response = match pipeline.execute(&client, &body, ctx).await {
+            let response = match pipeline.execute(&client, &body, ctx.clone()).await {
                 Ok(response) => response,
                 Err(PipelineError::Cancelled) => return Err("request cancelled".into()),
                 Err(PipelineError::Transport(e)) => {
@@ -451,18 +451,16 @@ impl VendorRequest {
             };
 
             let status = response.status().as_u16();
-            let read_body = async { response.text().await.map_err(|e| transport_error(&e)) };
-            let body = tokio::select! {
-                _ = cancel.cancelled() => {
-                    return Err("request cancelled".into());
-                }
-                result = read_body => result,
-            };
-
-            let body = match body {
+            let body = match self.read_response_body(response, &ctx).await {
                 Ok(body) => body,
-                Err(e) => {
+                Err(PipelineError::Cancelled) => return Err("request cancelled".into()),
+                Err(PipelineError::Transport(e)) => {
                     last_err = format!("⚠️ {attempt}-attempt request failed: {e}");
+                    self.log_line(&last_err).await;
+                    continue;
+                }
+                Err(PipelineError::Hook(e)) => {
+                    last_err = format!("⚠️ {attempt}-attempt request hook failed: {e}");
                     self.log_line(&last_err).await;
                     continue;
                 }
@@ -494,6 +492,39 @@ impl VendorRequest {
         }
 
         Err(last_err)
+    }
+
+    /// Read the response body while keeping the console waiting ticker alive.
+    ///
+    /// [`RequestPipeline::execute`] stops running [`DurAction`]s as soon as
+    /// the response headers arrive. Non-streaming vendors spend most of the
+    /// wall-clock time in [`Response::text`], so the waiting indicator is
+    /// continued here with the same tick and cancellation semantics.
+    async fn read_response_body(
+        &self,
+        response: Response,
+        ctx: &PipelineContext,
+    ) -> Result<String, PipelineError> {
+        let read_body = async { response.text().await.map_err(|e| transport_error(&e)) };
+        tokio::pin!(read_body);
+
+        let mut ticker = tokio::time::interval(ctx.tick);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let waiting = WaitingAction::new(self.interaction.clone());
+
+        loop {
+            tokio::select! {
+                _ = ctx.cancel.cancelled() => {
+                    return Err(PipelineError::Cancelled);
+                }
+                _ = ticker.tick() => {
+                    waiting.execute(ctx).await?;
+                }
+                result = &mut read_body => {
+                    return result.map_err(|e| PipelineError::Transport(e));
+                }
+            }
+        }
     }
 
     async fn log_line(&self, message: &str) {
@@ -538,6 +569,89 @@ fn format_waiting_time(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+
+    #[derive(Clone, Default)]
+    struct RecordingInteraction {
+        lines: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Interaction for RecordingInteraction {
+        async fn output(
+            &self,
+            message: &str,
+            _write_log: bool,
+            _new_line: OutputType,
+        ) -> Result<(), interactions::InteractionError> {
+            self.lines.lock().unwrap().push(message.to_string());
+            Ok(())
+        }
+
+        async fn input(
+            &self,
+            _request: &interactions::InteractionRequest,
+            _write_log: bool,
+        ) -> Result<String, interactions::InteractionError> {
+            unreachable!("input is not used by request waiting tests")
+        }
+    }
+
+    struct SlowServer {
+        url: String,
+        stop: Arc<AtomicBool>,
+    }
+
+    impl SlowServer {
+        fn spawn(body: &'static str, body_delay: Duration) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            let stop_thread = Arc::clone(&stop);
+
+            std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) => return,
+                        Ok(n) => request.extend_from_slice(&buf[..n]),
+                        Err(_) => return,
+                    }
+                }
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                if stream.write_all(response.as_bytes()).is_err() {
+                    return;
+                }
+                if stream.flush().is_err() {
+                    return;
+                }
+
+                let deadline = std::time::Instant::now() + body_delay;
+                while std::time::Instant::now() < deadline {
+                    if stop_thread.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                if !stop_thread.load(Ordering::SeqCst) {
+                    let _ = stream.write_all(body.as_bytes());
+                }
+            });
+
+            Self {
+                url: format!("http://{addr}"),
+                stop,
+            }
+        }
+    }
 
     #[tokio::test]
     async fn rate_limit_wait_respects_cancellation() {
@@ -580,6 +694,85 @@ mod tests {
                 },
             )
             .await;
+        assert_eq!(result.unwrap_err(), PipelineError::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn read_response_body_keeps_ticking_while_body_is_slow() {
+        let server = SlowServer::spawn("{}", Duration::from_millis(2600));
+        let interaction = Arc::new(RecordingInteraction::default());
+        let vendor = VendorRequest::new(-1, -1, -1, interaction.clone());
+        let client = Client::builder().no_proxy().build().unwrap();
+        let response = client.get(&server.url).send().await.unwrap();
+
+        let ctx = PipelineContext {
+            attempt: 1,
+            url: server.url.clone(),
+            started_at: std::time::Instant::now(),
+            tick: Duration::from_secs(1),
+            cancel: CancellationToken::new(),
+        };
+
+        let body = vendor.read_response_body(response, &ctx).await.unwrap();
+        assert_eq!(body, "{}");
+
+        let lines = interaction.lines.lock().unwrap();
+        let total_seconds: Vec<u64> = lines
+            .iter()
+            .map(|line| {
+                let rest = line.strip_prefix("response waiting time: ").unwrap();
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                let minutes: u64 = parts[0].parse().unwrap();
+                let seconds: u64 = parts[2].parse().unwrap();
+                minutes * 60 + seconds
+            })
+            .collect();
+
+        assert!(
+            total_seconds.len() >= 2,
+            "expected at least two ticks, got {lines:?}"
+        );
+        assert!(
+            total_seconds.windows(2).any(|pair| pair[0] != pair[1]),
+            "expected the counter to advance, got {total_seconds:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_response_body_cancels_when_token_is_cancelled() {
+        let server = SlowServer::spawn("{}", Duration::from_secs(30));
+        let interaction = Arc::new(RecordingInteraction::default());
+        let interaction_for_task = interaction.clone();
+        let url = server.url.clone();
+        let cancel = CancellationToken::new();
+        let cancel_for_task = cancel.clone();
+
+        let task = tokio::spawn(async move {
+            let vendor = VendorRequest::new(-1, -1, -1, interaction_for_task);
+            let client = Client::builder().no_proxy().build().unwrap();
+            let response = client.get(&url).send().await.unwrap();
+            let ctx = PipelineContext {
+                attempt: 1,
+                url,
+                started_at: std::time::Instant::now(),
+                tick: Duration::from_secs(1),
+                cancel: cancel_for_task,
+            };
+            vendor.read_response_body(response, &ctx).await
+        });
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while interaction.lines.lock().unwrap().is_empty() {
+            if std::time::Instant::now() > deadline {
+                panic!("waiting indicator was not printed before cancellation");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        cancel.cancel();
+        let result = task.await.unwrap();
+        server.stop.store(true, Ordering::SeqCst);
+
         assert_eq!(result.unwrap_err(), PipelineError::Cancelled);
     }
 }
