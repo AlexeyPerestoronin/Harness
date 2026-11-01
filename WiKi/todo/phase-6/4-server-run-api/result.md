@@ -48,7 +48,7 @@ flowchart TB
 
 - `harness-api` — общие DTO REST;
 - `auth` — Bearer-токен и middleware;
-- `axum` / `axum-server` (`tls-rustls`) — HTTPS REST сервер;
+- `axum` / `axum-server` (`tls-rustls-no-provider`) — HTTPS REST сервер;
 - `rcgen` — самоподписанный TLS-сертификат;
 - `ulid` — идентификаторы `req_` + 26 символов;
 - `chrono` — ISO-8601 время;
@@ -219,3 +219,32 @@ POST /api/v1/run/input       защищён
 
 - `cargo build --workspace` — успех;
 - `cargo test -p cli-harness` — 16 тестов успешно.
+
+## 5. Исправление ошибки rustls CryptoProvider
+
+При ручной проверке `cargo run -p cli-harness -- --serve --port 4067` сервер падал при первом TLS-рукопожатии:
+
+```text
+Could not automatically determine the process-level CryptoProvider from Rustls crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually,
+or make sure exactly one of the 'aws-lc-rs' and 'ring' features is enabled.
+```
+
+### Было
+
+- `cli-harness/Cargo.toml`: `axum-server = { version = "0.7", features = ["tls-rustls"] }`.
+- `agent-loop/Cargo.toml`: `reqwest = { ..., features = ["json", "rustls-tls"] }`.
+- `axum-server/tls-rustls` включал у `rustls` feature `aws-lc-rs`.
+- `reqwest/rustls-tls` включал у `rustls` feature `ring`.
+
+В результате у `rustls` были включены одновременно обе фичи провайдера, и `rustls` не мог автоматически выбрать process-level `CryptoProvider`.
+
+### Стало
+
+- `cli-harness/Cargo.toml`: `axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }`.
+
+`tls-rustls-no-provider` даёт тот же модуль `axum_server::tls_rustls::RustlsConfig`, но не форсирует `aws-lc-rs`. Единственный провайдер `ring` остаётся включённым через `agent-loop → reqwest → rustls/ring`.
+
+### Почему
+
+Теперь выполнено требование `rustls`: включена ровно одна фича провайдера (`ring`), поэтому `CryptoProvider` определяется автоматически, и `CryptoProvider::install_default()` в коде не требуется. Это подтверждается `cargo tree -p cli-harness -e features -i rustls`: у `rustls` присутствует только feature `ring` и отсутствует `aws-lc-rs`.

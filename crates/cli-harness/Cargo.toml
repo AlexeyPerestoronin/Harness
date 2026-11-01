@@ -21,8 +21,10 @@ harness-api = { path = "../harness-api" }
 auth = { path = "../auth" }
 # HTTPS REST server.
 axum = "0.8"
-# TLS termination for axum with rustls.
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+# TLS termination for axum with rustls. `tls-rustls-no-provider` does not
+# force rustls' `aws-lc-rs` provider; the workspace already enables exactly
+# one rustls provider (`ring`) through `agent-loop` → `reqwest`.
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
 # Self-signed certificate generation for the first server start.
 rcgen = "0.13"
 # ULID request ids for pending input (`req_` + 26 chars).
