@@ -91,3 +91,8 @@ RULES:
     (no arguments also starts the server).
     --conf cannot be used with --dump (configuration is taken from the dump file).
     --port, --host, --tls-cert, --tls-key and --auth-token are only valid with --serve.
+
+EXAMPLES:
+    harness.exe --serve
+    harness.exe --serve --host 127.0.0.1 --port 4067
+    harness.exe --serve --auth-token <token> --conf harness.json5

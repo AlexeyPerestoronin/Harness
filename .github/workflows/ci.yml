@@ -4,10 +4,15 @@ on:
   push:
     branches:
       - master
+    tags:
+      - 'v*'
+      - 'harness-*'
 
 permissions:
   contents: read
   actions: write
+  pages: write
+  id-token: write
 
 jobs:
   ci:
@@ -17,6 +22,7 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+          - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -29,7 +35,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Build release
-        run: cargo build --release --workspace
+        run: cargo build --release -p cli-harness
 
       - name: Read version from Cargo.toml
         id: version
@@ -47,18 +53,29 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Artifact name
+      - name: Artifact name and path
         id: artifact
         shell: bash
         run: |
-          name="harness-${{ steps.version.outputs.version }}"
-          if [ "${RUNNER_OS}" = "Windows" ]; then
-            name="${name}.exe"
-            echo "path=target/release/harness.exe" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=target/release/harness" >> "$GITHUB_OUTPUT"
-          fi
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          version="${{ steps.version.outputs.version }}"
+          case "$RUNNER_OS" in
+            Windows)
+              echo "name=harness-${version}.exe" >> "$GITHUB_OUTPUT"
+              echo "path=target/release/cli-harness.exe" >> "$GITHUB_OUTPUT"
+              ;;
+            Linux)
+              echo "name=harness-${version}-linux" >> "$GITHUB_OUTPUT"
+              echo "path=target/release/cli-harness" >> "$GITHUB_OUTPUT"
+              ;;
+            macOS)
+              echo "name=harness-${version}-macos" >> "$GITHUB_OUTPUT"
+              echo "path=target/release/cli-harness" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported runner OS: $RUNNER_OS" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Delete previous artifacts with the same name
         env:
@@ -66,7 +83,7 @@ jobs:
           ARTIFACT_NAME: ${{ steps.artifact.outputs.name }}
         shell: bash
         run: |
-          if ! echo "$ARTIFACT_NAME" | grep -Eq '^harness-[0-9]+\.[0-9]+\.[0-9]+(\.exe)?$'; then
+          if ! echo "$ARTIFACT_NAME" | grep -Eq '^harness-[0-9]+\.[0-9]+\.[0-9]+(-linux|-macos)?(\.exe)?$'; then
             echo "Unexpected artifact name: $ARTIFACT_NAME" >&2
             exit 1
           fi
@@ -84,3 +101,104 @@ jobs:
           path: ${{ steps.artifact.outputs.path }}
           if-no-files-found: error
           overwrite: true
+
+  web:
+    name: Build web client (Trunk)
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      - name: Build web client
+        run: |
+          cd crates/web-harness
+          trunk build --release
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: crates/web-harness/dist
+
+  deploy-pages:
+    name: Deploy web client to GitHub Pages
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    needs: web
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: ci
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from Cargo.toml
+        id: version
+        shell: bash
+        run: |
+          version="$(
+            grep -A 20 '^\[workspace.package\]' Cargo.toml \
+              | grep '^version =' \
+              | head -n 1 \
+              | cut -d '"' -f 2
+          )"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: harness-${{ steps.version.outputs.version }}.exe
+          path: dist/win
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: harness-${{ steps.version.outputs.version }}-linux
+          path: dist/linux
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: harness-${{ steps.version.outputs.version }}-macos
+          path: dist/macos
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find dist/win -type f -exec cp {} "release/harness-${{ steps.version.outputs.version }}.exe" \;
+          find dist/linux -type f -exec cp {} "release/harness-${{ steps.version.outputs.version }}-linux" \;
+          find dist/macos -type f -exec cp {} "release/harness-${{ steps.version.outputs.version }}-macos" \;
+          ls -la release
+
+      - name: Create release and upload binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*

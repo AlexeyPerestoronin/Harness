@@ -4,38 +4,87 @@
 
 ## What this is
 
-Native agent harness in Rust: CLI `harness.exe`, an agent loop, HTTP agents for xAI (Grok), Google (Gemini), Claude, DeepSeek and AliBaba (Qwen), and a tool registry.
+Native agent harness in Rust: CLI `harness.exe`, an agent loop, HTTP agents for xAI (Grok), Google (Gemini), Claude, DeepSeek and AliBaba (Qwen), a tool registry, an HTTPS server mode, and a Leptos WASM web client (`harness.wasm`).
 
 ## Build
 
-Cargo workspace: `crates/conf`, `crates/harness`, `crates/logger`, `crates/tools`.
+Cargo workspace: `crates/conf`, `crates/logger`, `crates/tools`, `crates/harness-api`, `crates/interactions`, `crates/agent-loop`, `crates/auth`, `crates/cli-harness`. `crates/web-harness` is excluded from the workspace and is built separately with Trunk.
 
 ```bash
 cargo test --workspace
-cargo build --release --workspace
+cargo build --release -p cli-harness
 ```
 
-Binary: `target/release/harness` (`harness.exe` on Windows).
+Binary: `target/release/cli-harness` (`target/release/cli-harness.exe` on Windows). Release artifacts are published as `harness-<version>-linux`, `harness-<version>-macos` and `harness-<version>.exe`.
 
 ## CLI
 
-From `crates/harness/help.txt`:
+From `crates/cli-harness/help.txt`:
 
 ```text
 harness.exe --help
 harness.exe --help-tools
 harness.exe --version
-harness.exe [--conf <path>] --prompt "<user prompt>"
-harness.exe [--conf <path>] --prompt-file <path to prompt file>
-harness.exe --dump "<path to dump file>"
+harness.exe [--serve] [--host <addr>] [--port <port>] [--conf <path>] [--cwd <path>]
+            [--tls-cert <path> --tls-key <path>] [--auth-token <token>]
+harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt "<user prompt>"
+harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt-file <path to prompt file>
+harness.exe [--cwd <path>] [--api-key <key>] --dump "<path to dump file>"
 harness.exe --conf-new "<path to new conf file>"
 ```
 
 Rules:
 
-- `--prompt`, `--prompt-file`, `--dump` and `--conf-new` are mutually exclusive. One of them is required.
-- `--conf` is optional for a new session. Default: `<process-cwd>/harness.json5` (the process working directory, not `settings.cwd`). Cannot be combined with `--conf-new` or `--dump`.
+- No arguments (or `--serve`) starts the HTTPS server.
+- `--prompt`, `--prompt-file`, `--dump` and `--conf-new` are mutually exclusive. One of them is required for a console session.
+- `--conf` is optional. Default: `<process-cwd>/harness.json5` for console sessions and `<cwd>/harness.json5` for the server. Cannot be combined with `--conf-new` or `--dump`.
 - `--prompt` starts a new session. `--prompt-file` starts a new session with the user prompt read from a UTF-8 file. `--dump` continues from a dump file (the prompt is taken from dump history; configuration is taken from the dump, `--conf` is forbidden). `--conf-new` writes a commented JSON5 template and exits.
+- `--port`, `--host`, `--tls-cert`, `--tls-key` and `--auth-token` are valid only with `--serve`.
+
+## Server mode
+
+`harness.exe --serve` (or no arguments) starts the HTTPS API server. The default port is `4067`; priority: `--port`, then `server.port` from `harness.json5`, then `4067`.
+
+Server flags:
+
+- `--host <addr>` — bind address, default `127.0.0.1`;
+- `--port <port>` — HTTPS port in range `1..=65535`;
+- `--conf <path>` — path to `harness.json5` (default: `<cwd>/harness.json5`);
+- `--cwd <path>` — workspace root override;
+- `--auth-token <token>` — fixed Bearer token; when omitted, a random token is generated and printed to stdout;
+- `--tls-cert <path>` and `--tls-key <path>` — user PEM certificate/key instead of the auto-generated self-signed certificate.
+
+All `/api/v1/*` endpoints except `GET /api/v1/health` require the `Authorization: Bearer <token>` header. The token is printed to stdout on server start when `--auth-token` is not provided.
+
+The server listens on `127.0.0.1` by default. For remote access pass `--host 0.0.0.0` (or a specific interface) and add the web-client origin to `server.cors-allowed-origins` in `harness.json5`.
+
+On first start the server auto-generates a self-signed TLS certificate and stores it in the OS data directory outside `cwd`.
+
+## Web client
+
+`harness.wasm` is a pure Rust/Leptos CSR client built with Trunk:
+
+```bash
+cd crates/web-harness
+trunk build --release
+```
+
+The build output is `crates/web-harness/dist`. CI publishes it to GitHub Pages on every push to `master`.
+
+The client:
+
+- connects to the server over HTTPS (for example `https://localhost:4067`);
+- polls the run status URL every 10 seconds;
+- shows run status, `pendingInput` prompts and the final result;
+- does **not** show the session log, does **not** select an agent and does **not** manage API keys — the server asks for them as ordinary `pendingInput` requests.
+
+Self-signed certificate: after the first server start, open `https://localhost:4067/api/v1/health` in the browser and accept the certificate exception before using `harness.wasm` from GitHub Pages.
+
+## web-harness integration
+
+`web-harness` is published as a Git tag for source-level integration into other Leptos WASM applications through Cargo/Git. Enable the `fs-panel` feature to get the `ConfigEditor` and `FsBrowser` components; the standalone Pages build uses the default feature set.
+
+In the first version `web-harness` is not published to crates.io.
 
 ## Configuration
 
@@ -47,6 +96,11 @@ Rules:
   - `config` — path to a model file or a folder of model files (you will be asked to choose). Relative paths are resolved against the directory of this conf file.
   - `mode` — `safe` (ask when a limit is exceeded) or `auto-accept` (log and continue).
   - `token-limit`, `iteration-limit`, `USD-limit` — session limits; `-1` = unlimited.
+- `server` — optional HTTPS server settings:
+  - `host` — bind address, default `127.0.0.1`;
+  - `port` — default port `4067`;
+  - `tls-cert`, `tls-key` — optional PEM certificate/key paths;
+  - `cors-allowed-origins` — explicit origin allowlist, `[]` by default.
 - `tools` — object of enabled tool modules.
 
 ### Model file
@@ -77,4 +131,9 @@ A missing key in `tools` means the module is not registered. An unknown key is a
 
 ## CI
 
-GitHub Actions on push to `master`, Windows and Linux (`windows-latest`, `ubuntu-latest`): `cargo test --workspace` and `cargo build --release --workspace`.
+GitHub Actions on push to `master` and on tags `v*` / `harness-*`:
+
+- builds and tests the workspace on `ubuntu-latest`, `windows-latest` and `macos-latest`;
+- builds `cli-harness` in release mode and uploads `harness-<version>.exe`, `harness-<version>-linux` and `harness-<version>-macos` artifacts;
+- builds `web-harness` with Trunk and publishes `dist` to GitHub Pages on push to `master`;
+- creates a GitHub Release with the three native binaries when a tag is pushed.
