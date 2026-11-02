@@ -1,10 +1,50 @@
 # Native Agent Harness
 
-[Русский](README.ru.md)
-
 ## What this is
 
 Native agent harness in Rust: CLI `harness.exe`, an agent loop, HTTP agents for xAI (Grok), Google (Gemini), Claude, DeepSeek and AliBaba (Qwen), a tool registry, an HTTPS server mode, and a Leptos WASM web client (`harness.wasm`).
+
+## Architecture
+
+The system is a Cargo workspace of native crates plus a separate WASM crate:
+
+| Crate | Kind | Responsibility |
+|---|---|---|
+| `logger` | native lib | `Logger` contract; file and null sinks |
+| `interactions` | native lib | `Interaction` contract, `OutputType`, CLI interaction |
+| `auth` | native lib | Bearer-token generation, constant-time comparison, axum middleware |
+| `harness-api` | native lib | REST DTOs shared by the server and the web client |
+| `conf` | native lib | Loading and validation of `harness.json5` and model files |
+| `tools` | native lib | Tool registry: `fs`, `git`, `terminal`, `user`, `skills`, `roles` |
+| `agent-loop` | native lib | Async agent loop, vendor agents, `VendorRequest` |
+| `cli-harness` | native bin | CLI (`--prompt`) and HTTPS server (`--serve` / no arguments) |
+| `web-harness` | WASM lib + bin | Leptos CSR client, `HarnessGateway`, `HarnessPanel` |
+
+`web-harness` is excluded from the Cargo workspace and is built separately with Trunk.
+
+```mermaid
+flowchart LR
+    WEB[web-harness] -->|HTTPS REST + polling 10s| CLI[cli-harness]
+    CLI --> CONF[conf]
+    CONF --> AL[agent-loop]
+    AL --> VENDOR[Vendor LLM APIs]
+```
+
+The client and the server communicate only over HTTPS REST with polling every 10 seconds. The server does not serve the frontend and does not use SSE or WebSocket.
+
+## Technologies
+
+| Technology | Purpose |
+|---|---|
+| Rust / tokio | Async runtime for the server, the agent loop, cancellation and timeouts |
+| axum + axum-server + rustls | HTTPS REST server with built-in TLS termination |
+| rcgen | Automatic self-signed TLS certificate generation on first server start |
+| async reqwest | Async HTTP client for vendor LLM APIs |
+| Leptos CSR | Reactive client-side UI for `harness.wasm` |
+| Trunk | Pure-Rust WASM build for `web-harness` without Node.js |
+| gloo-net | `fetch`/HTTP calls from the WASM client |
+| serde / serde_json | DTO serialization and JSON handling |
+| JSON5 | Human-friendly configuration format (`harness.json5`, model files) |
 
 ## Build
 
@@ -79,6 +119,20 @@ The client:
 - does **not** show the session log, does **not** select an agent and does **not** manage API keys — the server asks for them as ordinary `pendingInput` requests.
 
 Self-signed certificate: after the first server start, open `https://localhost:4067/api/v1/health` in the browser and accept the certificate exception before using `harness.wasm` from GitHub Pages.
+
+## Basic workflows
+
+### 1. Console session
+
+`harness.exe --conf harness.json5 --prompt "..."` (or `--prompt-file <path to prompt file>`) starts a console session. If `agent.config` points to a folder or the selected model has no API key, the harness asks for the agent/key in the console. The session writes `log.md` and `dump.json`; `--dump "<path to dump file>"` continues an existing session.
+
+### 2. Server + web client
+
+`harness.exe --serve` (or no arguments) starts the HTTPS server. When `--auth-token` is not provided, the random Bearer token is printed to stdout. Open `harness.wasm`, connect to the server (for example `https://localhost:4067`) with the token, start a run with `POST /run`, then poll the returned `runUrl` every 10 seconds and answer `pendingInput` requests until the result is shown.
+
+### 3. Embedded plugin
+
+Add `web-harness` to a parent Leptos WASM application via Cargo/Git and render `HarnessPanel`. Optionally enable the `fs-panel` feature to get the `ConfigEditor` and `FsBrowser` components backed by the server FS API.
 
 ## web-harness integration
 
