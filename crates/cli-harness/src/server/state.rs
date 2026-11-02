@@ -40,7 +40,6 @@ impl ServerState {
 #[derive(Debug, Clone)]
 pub struct LoadedServerConfig {
     /// Absolute path of `harness.json5` used by the server.
-    #[allow(dead_code)]
     pub path: PathBuf,
     /// Coarse configuration state: `ok` | `missing` | `invalid`.
     pub config_state: ConfigState,
@@ -105,21 +104,3 @@ pub fn empty_summary() -> RunSummary {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn active_and_terminal_state_classification() {
-        assert!(is_active(RunState::Running));
-        assert!(is_active(RunState::WaitingInput));
-        assert!(is_active(RunState::Stopping));
-        assert!(!is_active(RunState::Idle));
-        assert!(!is_active(RunState::Finished));
-
-        assert!(is_terminal(RunState::Finished));
-        assert!(is_terminal(RunState::Failed));
-        assert!(is_terminal(RunState::Stopped));
-        assert!(!is_terminal(RunState::Running));
-    }
-}

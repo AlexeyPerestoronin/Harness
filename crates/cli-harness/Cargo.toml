@@ -39,7 +39,3 @@ json5 = "0.4"
 # Async runtime for the CLI entry point and the server.
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tokio-util = "0.7"
-
-[dev-dependencies]
-# Router oneshot tests.
-tower = { version = "0.5", features = ["util"] }

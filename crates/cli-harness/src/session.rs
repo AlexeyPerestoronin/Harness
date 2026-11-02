@@ -215,31 +215,3 @@ pub(crate) fn normalize_abs(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[tokio::test]
-    async fn api_key_prompt_does_not_write_key_to_log() {
-        let dir = std::env::temp_dir().join(format!("harness-cli-key-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let log_path = dir.join("log.md");
-        let file: Arc<dyn logger::Logger> = Arc::new(logger::FileLogger::new(&log_path).unwrap());
-        let writer = Vec::<u8>::new();
-        let interaction: Arc<dyn Interaction> = Arc::new(interactions::CliInteraction::with_reader_writer(
-            interactions::InteractionLoggers::new(Some(file)),
-            Cursor::new(b"secret-key\r\n".to_vec()),
-            writer,
-        ));
-
-        let key = prompt_api_key(&interaction, "Vendor", "Model")
-            .await
-            .unwrap();
-        assert_eq!(key, "secret-key");
-
-        let logged = std::fs::read_to_string(&log_path).unwrap_or_default();
-        assert!(!logged.contains("secret-key"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}

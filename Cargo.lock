@@ -251,7 +251,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tools",
- "tower",
  "ulid",
 ]
 
@@ -1543,7 +1542,6 @@ dependencies = [
 name = "tools"
 version = "2.0.0"
 dependencies = [
- "async-trait",
  "conf",
  "encoding_rs",
  "interactions",

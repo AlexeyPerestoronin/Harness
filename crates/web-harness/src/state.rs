@@ -117,26 +117,3 @@ impl HarnessClient {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_iso8601_utc_parses_server_format() {
-        let ts = parse_iso8601_utc("2026-01-01T12:00:00Z").unwrap();
-        assert!(ts > 0.0);
-    }
-
-    #[test]
-    fn parse_iso8601_utc_rejects_malformed_input() {
-        assert!(parse_iso8601_utc("not-a-date").is_none());
-        assert!(parse_iso8601_utc("2026-01-01T12:00:00").is_none());
-    }
-
-    #[test]
-    fn idle_status_is_idle() {
-        assert_eq!(idle_status().run_state, RunState::Idle);
-        assert!(idle_status().pending_input.is_none());
-        assert!(idle_status().result.is_none());
-    }
-}

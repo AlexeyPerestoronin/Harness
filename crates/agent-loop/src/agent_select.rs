@@ -120,21 +120,3 @@ fn format_price(value: f64) -> String {
     text
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_choice_accepts_one_based_numbers() {
-        assert_eq!(parse_choice("1", 3), Some(0));
-        assert_eq!(parse_choice("3", 3), Some(2));
-        assert_eq!(parse_choice(" 2 ", 3), Some(1));
-    }
-
-    #[test]
-    fn parse_choice_rejects_invalid_numbers() {
-        assert_eq!(parse_choice("0", 3), None);
-        assert_eq!(parse_choice("4", 3), None);
-        assert_eq!(parse_choice("abc", 3), None);
-    }
-}

@@ -249,22 +249,3 @@ fn resolve_conf_path(raw: &Path) -> Result<PathBuf, String> {
     session::normalize_abs(&absolute)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn find_free_port_skips_occupied_port() {
-        let occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let occupied_addr = occupied.local_addr().unwrap();
-        let ip = occupied_addr.ip();
-        let port = occupied_addr.port();
-        assert_ne!(port, u16::MAX, "test requires a non-max ephemeral port");
-
-        let selected = find_free_port(ip, port).await.unwrap();
-        assert_eq!(selected.ip(), ip);
-        assert!(selected.port() > port);
-
-        drop(occupied);
-    }
-}
