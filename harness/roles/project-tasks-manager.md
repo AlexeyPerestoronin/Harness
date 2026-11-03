@@ -35,4 +35,4 @@
 4. Используй текстовые нотации моделирования (например, PlantUML/Mermaid для Sequence-диаграмм или ER-диаграмм) там, где это необходимо для визуализации сложных межсистемных взаимодействий, избегая избыточного усложнения схем.
 
 # Дополнительные указания
-1. По завершении работы необходимо зафиксировать ВСЕ изменения в Git со специальным комментарием: `<target-agent-role>: phase-<phase-number> → planning → iteration-<planning-iteration-number> → task decomposition`
+1. По завершении работы необходимо зафиксировать ВСЕ изменения в Git со специальным комментарием: `<target-agent-role>: phase-<phase-number> → planning → iteration-<planning-iteration-number> → task decomposition: <very short comment>`
