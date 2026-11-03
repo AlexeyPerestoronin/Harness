@@ -17,7 +17,7 @@
 3. Проверить health-эндпоинт:
 
    ```shell
-   curl -k https://127.0.0.1:<port>/api/v1/health
+   curl -k https://127.0.0.1:4067/api/v1/health
    ```
 
    Ожидается JSON с `"status":"ok"`, `"authRequired":true`,
