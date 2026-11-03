@@ -280,8 +280,8 @@ sequenceDiagram
   - Стриминг в stdout остаётся полным (для человека).
 - `tools/src/lib.rs`
   - Добавить `arg_i64(args, key, default) -> Result<i64, String>`:
-    принимает JSON-число или числовую строку, отклоняет bool/null/object/
-    array/дробные/выход за `i64`.
+    принимает JSON-число или числовую строку; отсутствие/null → `default`;
+    отклоняет bool/object/array/дробные/выход за `i64`.
   - Вызывающие модули дополнительно проверяют `-1` или `>= 0`.
 - `tools/src/terminal.rs`
   - `run_shell` читает `output_buff_size` через `arg_i64(args, "output_buff_size", -1)?`,
