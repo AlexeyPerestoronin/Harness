@@ -28,4 +28,4 @@
 4. **Валидация схем:** Проверяй корректность Mermaid диаграмм. Отражают ли они реальные потоки данных или содержат логические тупики и несостыковки?
 
 # Дополнительные указания
-1. По завершении работы необходимо зафиксировать ВСЕ изменения в Git со специальным комментарием: `<target-agent-role>: phase-<phase-number> → planning → iteration-<planning-iteration-number> → design-review-<design-review-iteration-number>: <very short comment>`
+1. По завершении работы необходимо зафиксировать результаты своей работы в Git со специальным комментарием: `[phase-<phase-number>][Designer Reviewer]: <verbose comment>`

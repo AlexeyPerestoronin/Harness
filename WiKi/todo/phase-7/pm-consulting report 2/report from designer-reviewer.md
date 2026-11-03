@@ -1,0 +1,166 @@
+# Report from Designer Reviewer — Phase 7, Planning, Consulting 2
+
+## Проверенные материалы
+- `WiKi/todo/phase-7/po-request.md`
+- `WiKi/todo/phase-7/pm-consulting report 1/report from designer-reviewer.md`
+- `WiKi/todo/phase-7/pm-consulting report 2/base.md`
+- `WiKi/todo/phase-7/pm-consulting report 2/arch.md`
+- `WiKi/todo/phase-7/pm-consulting report 2/tech.md`
+- `WiKi/todo/phase-7/pm-consulting report 2/api.md`
+- `WiKi/todo/phase-7/pm-consulting report 2/ui.md`
+
+Дополнительно сверено с фактическим кодом: `crates/conf`, `crates/tools`,
+`crates/cli-harness`, `crates/agent-loop/src/dump_settings.rs`,
+`.github/workflows/ci.yml`, `Cargo.toml`, `harness.json5`.
+
+---
+
+## 1. Что закрыто после review-1
+
+Все критические замечания предыдущего ревью в consulting 2 устранены:
+
+1. **Call-site'ы `load_server_config`** — добавлены `server/state.rs`
+   (`LoadedServerConfig.cwd`) и `server/config.rs` (`get_config`,
+   `config_default`, `validate_config_text`, `read_existing_parsed`,
+   `reload_server_config`, `refresh_server_config`). Проект после смены
+   сигнатуры соберётся, REST-слой получает CWD даже при
+   `settings == None`.
+2. **Default conf path** — `default_conf_path(cwd)` теперь единый для
+   консольного и server-режима; `default_conf_path_for_serve` удаляется.
+   Противоречие с `--cwd` в консольном режиме устранено.
+3. **TLS-пути и `api-key`** — явно зафиксированы как осознанные исключения
+   из правила «все пути внутри CWD», с резолвом относительных значений от CWD.
+4. **Корневая валидация** — введена; для ключа `cwd` предусмотрено отдельное
+   сообщение. Рекомендация `PUT /api/v1/config` с `cwd` → `CONFIG_INVALID`
+   теперь реализуема.
+5. **Glob-грамматика и Windows case-insensitivity** — определены строго:
+   подмножество `**/<component>`, трансляция через единый
+   `conf::glob::regex_source`, lowercasing на Windows.
+6. **Release** — имена upload/download согласованы (`harness-<version>-windows.exe`),
+   триггер ограничен `v*`, добавлена сверка версии, sha256 и
+   `generate_release_notes: true`.
+7. **Сводная таблица** — расширена основными файлами и тестами.
+
+Концепция по-прежнему соответствует PO, принципы KISS/YAGNI соблюдены.
+`api.md` и `ui.md` корректно не вводят новых DTO/эндпоинтов и не трогают
+`web-harness`.
+
+---
+
+## 2. Остались замечания
+
+### 2.1. `tools.git.executable` не классифицирован в модели CWD first
+
+`base.md` / `tech.md` перечисляют все пути конфига, проходящие через
+`resolve_in_cwd`, но `tools.git.executable` в списке отсутствует. При этом:
+- в шаблоне и `help-user.txt` поле описано как «Path or name of the git binary»;
+- текущий код (`conf/src/load.rs` → `load_git`, `tools/src/git.rs` →
+  `GitModule::run_git`) передаёт значение в `Command::new` как есть, без
+  резолва от CWD.
+
+Это ровно та же неоднозначность, которую review-1 требовал закрыть для TLS и
+`api-key`: поле может быть и путём, и именем команды. Если оставить его вне
+`resolve_in_cwd`, это надо явно объявить исключением (рекомендуется): «это
+исполняемый файл/имя команды, а не рабочий файл конфигурации; значение
+передаётся в `Command::new`, относительное значение без разделителей пути
+ищется в `PATH`». Если же считать его путём — тогда он должен резолвиться от
+CWD и проверяться на «внутри CWD», но это сломает обычное `"git"`.
+
+**Нужно:** выбрать вариант и зафиксировать в `arch.md` / `tech.md` /
+`help-user.txt` + тест. Без этого у разработчика останется развилка.
+
+### 2.2. В сводной таблице неверное число call-site'ов
+
+Строка `cli-harness/src/server/config.rs` в `arch.md` говорит
+«5 call-site'ов `load_server_config`», тогда как `api.md` и сам `arch.md`
+перечисляют шесть функций, а в текущем коде шесть прямых вызовов:
+`get_config`, `config_default`, `read_existing_parsed`, `validate_config_text`,
+`reload_server_config`, `refresh_server_config`.
+
+**Нужно:** поправить число на 6, чтобы таблица не противоречила тексту.
+
+### 2.3. `conf/src/str/keys.rs` отсутствует в сводной таблице
+
+Новый ключ `deprecated-dir-patterns` по конвенции проекта должен получить
+константу в `conf/src/str/keys.rs` (плюс, вероятно, константы/сообщения для
+корневой валидации и специальной ошибки `cwd`). В сводной таблице этот файл
+не упомянут.
+
+**Нужно:** добавить строку `conf/src/str/keys.rs` в таблицу изменений.
+
+### 2.4. Публичный `conf::load_model` остаётся вне новой модели `api-key`
+
+`conf/src/lib.rs` экспортирует `load_model(model_path, mode)`, который сейчас
+резолвит относительный `api-key`-путь от process cwd. В phase-7 `api-key`
+должен резолвиться от CWD, но в плане не сказано, что происходит с
+`load_model`: менять сигнатуру, оставить как есть или пометить устаревшим.
+
+**Нужно:** доопределить. Внутри workspace вызовов `load_model` сейчас нет,
+поэтому минимальный вариант — явно зафиксировать, что эта функция сохраняет
+старое поведение и не является частью CWD first.
+
+### 2.5. Release-валидация артефактов допускает несуществующие комбинации
+
+Предложенный regex
+`^harness-[0-9]+\.[0-9]+\.[0-9]+(-linux|-macos|-windows)?(\.exe)?$`
+пропускает `harness-2.1.0-windows` без `.exe`, `harness-2.1.0-linux.exe`,
+`harness-2.1.0-macos.exe`. Для «Delete previous artifacts with the same name»
+это не сломает CI, но делает валидацию нестрогой.
+
+**Рекомендация:** использовать строгую форму, например
+`^harness-[0-9]+\.[0-9]+\.[0-9]+(-linux|-macos|\.exe|-windows\.exe)?$`.
+Она допускает старый Windows-артефакт `harness-<ver>.exe` и все три целевых
+имени, но отклоняет `-windows` без `.exe` и `-linux.exe`.
+
+### 2.6. Совместимость со старыми dump-файлами не зафиксирована
+
+После phase-7 `load_from_value` будет отклонять `cwd` в `settings`. Это
+означает, что resume dump-файла, созданного в phase ≤6, упадёт с ошибкой
+корневой валидации. Если это осознанный breaking change — ок, но это должно
+быть явно записано в `base.md`/`arch.md`. Если нет — нужно предусмотреть
+миграцию (например, игнорировать `cwd` только при `load_from_value` для dump).
+
+**Нужно:** зафиксировать поведение и добавить тест «старый dump с `cwd`».
+
+---
+
+## 3. Что можно улучшить
+
+1. **`Sandbox::from_fs` и компиляция regex.** `from_fs` сейчас возвращает
+   `Sandbox`, а не `Result`. После добавления `Regex::new` нужно явно выбрать:
+   либо `from_fs` становится fallible, либо он полагается на то, что `conf`
+   уже провалидировал паттерны, и паникует/игнорирует при ручном вызове.
+   Рекомендуется `Result` или явный инвариант в документации.
+2. **Glob-метасимволы.** В грамматике `**/<component>` стоит явно написать,
+   что единственный wildcard — `*`; `?`, `[`, `]` и прочие символы regex
+   трактуются как литералы (экранируются). Это снимет вопрос «а что будет с
+   `**/log?`».
+3. **База для явного относительного `--conf` / `--dump`.** `resolve_abs_path`
+   введён для вывода в консоль, но не сказано, от какой базы он резолвит
+   относительные значения. Ожидаемо — от process cwd; стоит зафиксировать,
+   чтобы `--conf` не начали случайно резолвить от CWD.
+4. **Порядок проверок в `load_server_config`.** План говорит «сначала
+   `ensure_conf_in_cwd`, затем чтение/парсинг». Из этого следует, что
+   `--conf` вне CWD при отсутствующем файле вернёт ошибку запуска, а не
+   `Missing`. Это правильное поведение, но его стоит явно покрыть тестом.
+5. **`server/mod.rs` и абсолютность `LoadedServerConfig.path`.** Убедиться,
+   что `resolve_conf_path` (или `session::resolve_abs_path`) по-прежнему
+   вызывается до загрузки, и в `LoadedServerConfig.path` не попадает
+   относительный путь.
+
+---
+
+## 4. Вердикт
+
+**Согласовать с замечаниями.**
+
+Критические пробелы review-1 закрыты; направление и архитектурные решения
+верны. Перед передачей в Task Manager / Senior Developer необходимо внести
+точечные правки:
+
+- обязательно: пункт 2.1 (`tools.git.executable`);
+- обязательно: пункты 2.2 и 2.3 (таблица изменений);
+- желательно: 2.4–2.6.
+
+Полный повторный design review не требуется: достаточно проверить исправленные
+разделы (`arch.md` 3.2/7, `tech.md` 2.2, `base.md` to-be) после правок.
