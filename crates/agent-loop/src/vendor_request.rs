@@ -170,6 +170,12 @@ where
     fn build(&self, client: &Client, payload: &T) -> RequestBuilder {
         let mut req = client.post(&self.url).json(payload);
         for (key, value) in &self.extra_headers {
+            // `.json(payload)` already sets `Content-Type: application/json`.
+            // Adding it again produces a duplicate header which DeepSeek and
+            // xAI reject with HTTP 415.
+            if key.eq_ignore_ascii_case(reqwest::header::CONTENT_TYPE.as_str()) {
+                continue;
+            }
             req = req.header(key, value);
         }
         req
@@ -567,3 +573,49 @@ fn format_waiting_time(secs: u64) -> String {
     format!("{} min {} sec", secs / 60, secs % 60)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn json_pipeline_sets_content_type_once() {
+        let pipeline = JsonPipeline::<Value>::new("https://example.com")
+            .header("Authorization", "Bearer x")
+            .header("Content-Type", "application/json");
+        let client = Client::new();
+        let body = json!({"model": "m", "messages": []});
+
+        let request = pipeline.build(&client, &body).build().expect("request");
+
+        let content_types: Vec<_> = request
+            .headers()
+            .get_all(reqwest::header::CONTENT_TYPE)
+            .iter()
+            .collect();
+        assert_eq!(content_types.len(), 1);
+        assert_eq!(content_types[0].to_str().unwrap(), "application/json");
+    }
+
+    #[test]
+    fn json_pipeline_keeps_other_headers() {
+        let pipeline = JsonPipeline::<Value>::new("https://example.com")
+            .header("Authorization", "Bearer x")
+            .header("x-grok-conv-id", "conv-123");
+        let client = Client::new();
+        let body = json!({});
+
+        let request = pipeline.build(&client, &body).build().expect("request");
+
+        assert_eq!(request.headers().get("authorization").unwrap(), "Bearer x");
+        assert_eq!(request.headers().get("x-grok-conv-id").unwrap(), "conv-123");
+        assert_eq!(
+            request
+                .headers()
+                .get_all(reqwest::header::CONTENT_TYPE)
+                .iter()
+                .count(),
+            1
+        );
+    }
+}
