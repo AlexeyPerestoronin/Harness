@@ -129,11 +129,13 @@ flowchart TD
   - Все относительные пути конфига проводятся через `resolve_in_cwd`:
     - `agent.config`;
     - `tools.fs.available-dirs` / `available-files` /
-      `deprecated-dirs` / `deprecated-files` / `deprecated-dir-patterns`
+      `deprecated-dirs` / `deprecated-files`
       (для allow/deny строк — после снятия `r:`/`w:` префикса);
     - `tools.terminal.cwd-list`;
     - `tools.skills.<name>.file` и `tools.roles.<name>.file`;
     - `agent.log-folder`.
+  - `deprecated-dir-patterns` — это не пути, а glob-строки; они
+    валидируются через `glob::regex_source` и `Regex::new` (см. раздел 5).
   - Корневая валидация `harness.json5`: допустимы только `vars`, `server`,
     `agent`, `tools`. Неизвестный корневой ключ — ошибка; для `cwd` даётся
     отдельное сообщение «задайте CWD через `--cwd` или запустите процесс из
