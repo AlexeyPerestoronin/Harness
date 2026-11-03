@@ -69,13 +69,13 @@ flowchart TD
     A -->|нет| C[std::env::current_dir]
     B --> D[CWD]
     C --> D
-    D --> E[conf::load(conf_path, cwd)]
+    D --> E[conf::load par:conf_path, par:cwd]
     E --> F{conf внутри CWD?}
     F -->|нет| ERR[Ошибка запуска]
     F -->|да| G[Парсинг harness.json5]
     G --> H{каждый путь внутри CWD?}
     H -->|нет| ERR
-    H -->|да| I[Settings { cwd, ... }]
+    H -->|да| I[Settings  cwd, ... ]
     I --> J[Вывод 'cwd: ...' и 'conf: ...' в консоль]
     J --> K[Agent loop]
 ```
