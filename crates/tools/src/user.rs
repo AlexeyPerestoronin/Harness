@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 
 use crate::fs::Sandbox;
 use crate::process::run_observed_command;
-use crate::{arg_str, CallResult, ToolDescriptor};
+use crate::{arg_i64, arg_str, validate_output_buff_size, CallResult, ToolDescriptor};
 
 /// User-interaction tools.
 #[derive(Clone)]
@@ -58,7 +58,7 @@ impl UserModule {
             desc(
                 "request_command_shell_execution",
                 "Request permission from the user to execute a shell command.",
-                json!({"type":"object","properties":{"reason":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"}},"required":["reason","command","cwd"]}),
+                json!({"type":"object","properties":{"reason":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"},"output_buff_size":{"type":"integer","description":"N символов с конца; -1 = весь вывод"}},"required":["reason","command","cwd"]}),
             ),
         ]
     }
@@ -78,11 +78,14 @@ impl UserModule {
                     .await?,
             )),
             "request_command_shell_execution" => {
-                Ok(CallResult::plain(self.request_command_shell_execution(
-                    &arg_str(args, "reason")?,
-                    &arg_str(args, "command")?,
-                    &arg_str(args, "cwd")?,
-                ).await?))
+                let reason = arg_str(args, "reason")?;
+                let command = arg_str(args, "command")?;
+                let cwd = arg_str(args, "cwd")?;
+                let output_buff_size = arg_i64(args, "output_buff_size", -1)?;
+                Ok(CallResult::plain(
+                    self.request_command_shell_execution(&reason, &command, &cwd, output_buff_size)
+                        .await?,
+                ))
             }
             _ => Err(format!("tool '{name}' not available")),
         }
@@ -153,8 +156,10 @@ impl UserModule {
         reason: &str,
         command: &str,
         cwd: &str,
+        output_buff_size: i64,
     ) -> Result<String, String> {
-        self.request_command_shell_execution_inner(reason, command, cwd)
+        validate_output_buff_size(output_buff_size)?;
+        self.request_command_shell_execution_inner(reason, command, cwd, output_buff_size)
             .await
             .map_err(|e| format!("cannot request command shell execution → {e}"))
     }
@@ -164,6 +169,7 @@ impl UserModule {
         reason: &str,
         command: &str,
         cwd: &str,
+        output_buff_size: i64,
     ) -> Result<String, String> {
         let run_cwd = self
             .sandbox
@@ -180,7 +186,7 @@ impl UserModule {
                 })?;
                 let command = command.to_string();
                 tokio::task::spawn_blocking(move || {
-                    run_observed_command(&command, &run_cwd, timeout)
+                    run_observed_command(&command, &run_cwd, timeout, output_buff_size)
                 })
                 .await
                 .map_err(|e| e.to_string())?
@@ -274,3 +280,54 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use interactions::{CliInteraction, InteractionLoggers};
+
+    fn user_module() -> UserModule {
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(std::env::current_dir().unwrap())));
+        let interaction = Arc::new(CliInteraction::with_reader_writer(
+            InteractionLoggers::new(None),
+            std::io::Cursor::new("y\n"),
+            Vec::<u8>::new(),
+        ));
+        UserModule::new(sandbox, None, interaction)
+    }
+
+    fn args(value: Value) -> Map<String, Value> {
+        value.as_object().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn request_command_shell_execution_rejects_output_buff_size_below_minus_one() {
+        let module = user_module();
+        let args = args(json!({
+            "reason": "r",
+            "command": "cargo",
+            "cwd": ".",
+            "output_buff_size": -2
+        }));
+        let err = module
+            .call("request_command_shell_execution", &args)
+            .await
+            .unwrap_err();
+        assert!(err.contains("output_buff_size"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn request_command_shell_execution_rejects_non_integer_output_buff_size() {
+        let module = user_module();
+        let args = args(json!({
+            "reason": "r",
+            "command": "cargo",
+            "cwd": ".",
+            "output_buff_size": 1.5
+        }));
+        let err = module
+            .call("request_command_shell_execution", &args)
+            .await
+            .unwrap_err();
+        assert!(err.contains("output_buff_size"), "{err}");
+    }
+}

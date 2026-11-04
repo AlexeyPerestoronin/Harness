@@ -63,6 +63,17 @@ Configuration (`tools.fs`):
 
       "deprecated-files": []
 
+  deprecated-dir-patterns — array of strings, optional, default []
+    Glob denylist applied to every path and all its ancestors. Each pattern
+    must be `**/<component>`. Inside `<component>` the only wildcard is `*`
+    (zero or more characters except `/`). `?`, `[`, `]` and regex
+    metacharacters are literals; regex is not supported.
+
+      "deprecated-dir-patterns": ["**/log", "**/done", "**/note-*"]
+
+    Valid examples: `**/log`, `**/done`, `**/note-*`.
+    Invalid examples: `log/**`, `**/log/**`, `foo/**/bar`, `**`, `**/log/`.
+
 Tools:
   read_file                       Read the contents of a file.
   write_file                      Write a file.
@@ -94,8 +105,9 @@ Command::new(executable) from conf — never a hardcoded "git" program.
 Configuration (`tools.git`):
 
   executable — string, required, no default
-    Path or name of the git binary. Must be non-empty. The code never falls
-    back to "git".
+    External command / executable. The value is passed to `Command::new` as
+    is: it is not resolved from CWD and is not required to be inside CWD.
+    `"git"` is searched for in PATH.
 
       "executable": "C:/Program Files/Git/cmd/git.exe"
 
@@ -151,6 +163,19 @@ run_shell vs request_command_shell_execution:
     command immediately. Does not add it to available-commands. Needs
     tools.terminal so command-execution-limit is configured.
 
+Output buffering:
+
+  run_shell and request_command_shell_execution accept an optional last
+  argument `output_buff_size`, default `-1`. The full output is always
+  streamed to the user console; `output_buff_size` limits only the string
+  returned to the agent.
+
+    -1       whole output is returned to the agent
+    0        empty result string is returned to the agent
+    N > 0    last N Unicode characters are returned to the agent
+    < -1     error tool call
+    non-integer values are an error tool call
+
 
 user
 ====
@@ -170,6 +195,10 @@ Tools:
   request_read_access_for            Request read access to a folder/file.
   request_write_access_for           Request write access to a folder/file.
   request_command_shell_execution    Request permission to run a shell command.
+
+`request_command_shell_execution` accepts the same optional last argument
+`output_buff_size` as `run_shell` (default `-1`, semantics described in the
+terminal section).
 
 
 skills
@@ -277,6 +306,9 @@ Matching:
                               prefix (`target` does not block `target2`)
   deprecated-files            excluded from all operations; exact
                               absolute path
+  deprecated-dir-patterns     excluded from all operations; a path and all
+                              its ancestors are checked against each
+                              `**/<component>` glob
 
 deprecated-dirs / deprecated-files have no r: / w: prefixes. Intersection
 of deprecated-* with available-* at load time is an error. Nesting a
@@ -285,3 +317,6 @@ available `w:C:/proj` and deprecated `C:/proj/target`).
 
 Relative paths in these lists are resolved against the current working
 directory of the process, not settings.cwd.
+
+Path checks are lexical: symlinks and junctions are not canonicalized, so
+strict isolation through symlinks is not promised.

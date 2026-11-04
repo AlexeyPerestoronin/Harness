@@ -135,11 +135,11 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     /// Assemble modules from typed conf settings.
-    pub fn build(settings: &conf::ToolsSettings, ctx: ToolsContext) -> Self {
+    pub fn build(settings: &conf::ToolsSettings, ctx: ToolsContext) -> Result<Self, String> {
         let _ = std::fs::create_dir_all(&ctx.temp_dir);
 
         let mut modules = Vec::new();
-        let (fs_module, sandbox) = FsModule::build(settings.fs.as_ref(), &ctx.cwd);
+        let (fs_module, sandbox) = FsModule::build(settings.fs.as_ref(), &ctx.cwd)?;
         if let Some(m) = fs_module {
             modules.push(Module::Fs(m));
         }
@@ -178,10 +178,10 @@ impl ToolRegistry {
             modules.push(Module::Roles(RolesModule::new(roles)));
         }
 
-        Self {
+        Ok(Self {
             modules,
             interaction: ctx.interaction,
-        }
+        })
     }
 
     /// Descriptors of every enabled module, in registration order.
@@ -289,10 +289,89 @@ pub fn arg_str_or_empty(args: &Map<String, Value>, key: &str) -> String {
     arg_str(args, key).unwrap_or_default()
 }
 
+/// Integer tool-call argument with a default.
+///
+/// Accepts a JSON number representable as `i64` (no fractional part) or a
+/// string containing an integer. Missing and null values return `default`.
+/// Booleans, objects, arrays, fractional numbers and values outside `i64`
+/// are rejected.
+pub fn arg_i64(args: &Map<String, Value>, key: &str, default: i64) -> Result<i64, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(Value::Number(n)) => n
+            .as_i64()
+            .ok_or_else(|| format!("argument '{key}' must be an integer in i64 range")),
+        Some(Value::String(s)) => s
+            .parse::<i64>()
+            .map_err(|_| format!("argument '{key}' must be a string containing an integer")),
+        Some(Value::Bool(_)) => Err(format!("argument '{key}' must be an integer")),
+        Some(other) => Err(format!("argument '{key}' must be an integer, got {other}")),
+    }
+}
+
+/// Validate `output_buff_size`: `-1` (full output) or `>= 0` (last N chars).
+pub fn validate_output_buff_size(value: i64) -> Result<i64, String> {
+    if value == -1 || value >= 0 {
+        Ok(value)
+    } else {
+        Err(format!(
+            "argument 'output_buff_size' must be -1 or >= 0, got {value}"
+        ))
+    }
+}
+
 /// Read a text file whose path was set by the conf owner (skills / roles).
 ///
 /// Not sandboxed: the agent does not choose the path.
 fn read_conf_owned_file(path: &Path, action: &str) -> Result<String, String> {
     std::fs::read_to_string(path)
         .map_err(|e| format!("{action} → cannot read '{}': {e}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{arg_i64, validate_output_buff_size};
+    use serde_json::{json, Map, Value};
+
+    fn args(value: Value) -> Map<String, Value> {
+        let mut map = Map::new();
+        map.insert("v".to_string(), value);
+        map
+    }
+
+    #[test]
+    fn arg_i64_accepts_json_integer_and_numeric_string() {
+        assert_eq!(arg_i64(&args(json!(42)), "v", -1), Ok(42));
+        assert_eq!(arg_i64(&args(json!(-7)), "v", -1), Ok(-7));
+        assert_eq!(arg_i64(&args(json!("42")), "v", -1), Ok(42));
+        assert_eq!(arg_i64(&args(json!("-7")), "v", -1), Ok(-7));
+    }
+
+    #[test]
+    fn arg_i64_uses_default_for_missing_and_null() {
+        assert_eq!(arg_i64(&Map::new(), "v", -1), Ok(-1));
+        assert_eq!(arg_i64(&args(Value::Null), "v", 5), Ok(5));
+    }
+
+    #[test]
+    fn arg_i64_rejects_bool_object_array_fractional_and_out_of_i64() {
+        assert!(arg_i64(&args(json!(true)), "v", -1).is_err());
+        assert!(arg_i64(&args(json!({})), "v", -1).is_err());
+        assert!(arg_i64(&args(json!([])), "v", -1).is_err());
+        assert!(arg_i64(&args(json!(1.5)), "v", -1).is_err());
+        assert!(arg_i64(&args(json!("1.5")), "v", -1).is_err());
+        assert!(arg_i64(&args(json!("999999999999999999999999")), "v", -1).is_err());
+    }
+
+    #[test]
+    fn validate_output_buff_size_accepts_minus_one_and_non_negative() {
+        assert_eq!(validate_output_buff_size(-1), Ok(-1));
+        assert_eq!(validate_output_buff_size(0), Ok(0));
+        assert_eq!(validate_output_buff_size(10), Ok(10));
+    }
+
+    #[test]
+    fn validate_output_buff_size_rejects_values_below_minus_one() {
+        assert!(validate_output_buff_size(-2).is_err());
+    }
 }

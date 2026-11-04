@@ -1,7 +1,7 @@
 //! Filesystem tool set (`tools.fs`): files/folders, search, and allow-list introspection.
 //!
 //! This module owns `available-dirs`, `available-file-extensions`, `available-files`,
-//! `deprecated-dirs` and `deprecated-files`.
+//! `deprecated-dirs`, `deprecated-files` and `deprecated-dir-patterns`.
 //! `write_file` creates parent directories; `create_file` does not and truncates
 //! an existing file.
 
@@ -37,7 +37,7 @@ impl FsModule {
     pub fn build(
         settings: Option<&conf::FsSettings>,
         cwd: &Path,
-    ) -> (Option<Self>, Arc<Mutex<Sandbox>>) {
+    ) -> Result<(Option<Self>, Arc<Mutex<Sandbox>>), String> {
         match settings {
             Some(fs) => {
                 let module = Self::new(Arc::new(Mutex::new(Sandbox::from_fs(
@@ -47,11 +47,12 @@ impl FsModule {
                     &fs.available_file_extensions,
                     &fs.deprecated_dirs,
                     &fs.deprecated_files,
-                ))));
+                    &fs.deprecated_dir_patterns,
+                )?)));
                 let sandbox = module.sandbox.clone();
-                (Some(module), sandbox)
+                Ok((Some(module), sandbox))
             }
-            None => (None, Arc::new(Mutex::new(Sandbox::new(cwd.to_path_buf())))),
+            None => Ok((None, Arc::new(Mutex::new(Sandbox::new(cwd.to_path_buf()))))),
         }
     }
 

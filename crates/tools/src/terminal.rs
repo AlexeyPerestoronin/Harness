@@ -11,7 +11,7 @@ use serde_json::{json, Map, Value};
 
 use crate::fs::abspath;
 use crate::process::run_observed_command;
-use crate::{arg_str, arg_str_or_empty, CallResult, ToolDescriptor};
+use crate::{arg_i64, arg_str, arg_str_or_empty, validate_output_buff_size, CallResult, ToolDescriptor};
 
 /// Shell tools bound to the terminal allow-lists.
 #[derive(Clone)]
@@ -55,32 +55,46 @@ impl TerminalModule {
                 self.cwd_list,
                 path_string(&self.root_cwd())
             ),
-            json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"}},"required":["cwd","command"]}),
+            json!({"type":"object","properties":{"cwd":{"type":"string"},"command":{"type":"string"},"arguments":{"type":"string"},"output_buff_size":{"type":"integer","description":"N символов с конца; -1 = весь вывод"}},"required":["cwd","command"]}),
         )]
     }
 
     /// Dispatch a named terminal tool.
     pub fn call(&self, name: &str, args: &Map<String, Value>) -> Result<CallResult, String> {
         match name {
-            "run_shell" => Ok(CallResult::plain(self.run_shell(
-                &arg_str(args, "cwd")?,
-                &arg_str(args, "command")?,
-                &arg_str_or_empty(args, "arguments"),
-            )?)),
+            "run_shell" => {
+                let cwd = arg_str(args, "cwd")?;
+                let command = arg_str(args, "command")?;
+                let arguments = arg_str_or_empty(args, "arguments");
+                let output_buff_size = arg_i64(args, "output_buff_size", -1)?;
+                Ok(CallResult::plain(self.run_shell(
+                    &cwd,
+                    &command,
+                    &arguments,
+                    output_buff_size,
+                )?))
+            }
             _ => Err(format!("tool '{name}' not available")),
         }
     }
 
-    fn run_shell(&self, cwd: &str, command: &str, arguments: &str) -> Result<String, String> {
+    fn run_shell(
+        &self,
+        cwd: &str,
+        command: &str,
+        arguments: &str,
+        output_buff_size: i64,
+    ) -> Result<String, String> {
         if !self.available_commands.iter().any(|c| c == command) {
             return Err(format!(
                 "'{command}'-command is not available (available command list is {:?})",
                 self.available_commands
             ));
         }
+        validate_output_buff_size(output_buff_size)?;
         let run_cwd = self.validated_cwd(cwd, command)?;
         let cmd = format!("{command} {arguments}");
-        run_observed_command(&cmd, &run_cwd, self.command_execution_limit)
+        run_observed_command(&cmd, &run_cwd, self.command_execution_limit, output_buff_size)
     }
 
     /// Validate `cwd` and return its normalized absolute path.
@@ -136,5 +150,38 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
         name: name.to_string(),
         description: description.to_string(),
         parameters,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn module() -> TerminalModule {
+        TerminalModule::new(
+            std::env::current_dir().unwrap(),
+            vec![std::env::current_dir()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()],
+            vec!["cargo".to_string()],
+            10,
+        )
+    }
+
+    #[test]
+    fn run_shell_rejects_output_buff_size_below_minus_one() {
+        let err = module()
+            .run_shell(".", "cargo", "", -2)
+            .unwrap_err();
+        assert!(err.contains("output_buff_size"), "{err}");
+    }
+
+    #[test]
+    fn run_shell_call_rejects_non_integer_output_buff_size() {
+        let args = json!({"cwd": ".", "command": "cargo", "arguments": "", "output_buff_size": 1.5});
+        let args = args.as_object().unwrap().clone();
+        let err = module().call("run_shell", &args).unwrap_err();
+        assert!(err.contains("output_buff_size"), "{err}");
     }
 }

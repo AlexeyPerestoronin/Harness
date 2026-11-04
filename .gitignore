@@ -8,4 +8,4 @@ agent-*.json5
 .log
 *harness*.exe
 *harness*.json5
-prompt*.md
+prompt.md

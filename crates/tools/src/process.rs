@@ -12,8 +12,16 @@ use std::time::{Duration, Instant};
 
 /// Run `cmd` in `cwd` with a timeout, streaming output to stdout.
 ///
+/// The full output is streamed to the user console. Only the returned
+/// agent-visible string is limited to the last `output_buff_size` Unicode
+/// characters (`-1` = full output, `0` = empty result, `N > 0` = tail).
 /// Empty captured output becomes `(command finished without output)`.
-pub fn run_observed_command(cmd: &str, cwd: &Path, timeout_secs: u64) -> Result<String, String> {
+pub fn run_observed_command(
+    cmd: &str,
+    cwd: &Path,
+    timeout_secs: u64,
+    output_buff_size: i64,
+) -> Result<String, String> {
     let mut command = shell_command(cmd);
     command
         .current_dir(cwd)
@@ -61,7 +69,7 @@ pub fn run_observed_command(cmd: &str, cwd: &Path, timeout_secs: u64) -> Result<
     }
     let _ = status;
     let raw = chunks.lock().map(|g| g.clone()).unwrap_or_default();
-    Ok(decode_command_output(&raw))
+    Ok(tail_chars(&decode_command_output(&raw), output_buff_size))
 }
 
 fn spawn_pump<R: Read + Send + 'static>(
@@ -114,4 +122,41 @@ fn decode_command_output(raw: &[u8]) -> String {
         return oem.0.into_owned();
     }
     encoding_rs::WINDOWS_1251.decode(raw).0.into_owned()
+}
+
+/// Keep the last `n` Unicode characters of `s`.
+///
+/// `-1` keeps the whole string, `0` returns an empty string and `N > 0`
+/// keeps the tail. Callers validate the range before invoking this function.
+fn tail_chars(s: &str, n: i64) -> String {
+    match n {
+        -1 => s.to_string(),
+        0 => String::new(),
+        _ => s.chars().rev().take(n as usize)
+                 .collect::<Vec<_>>().into_iter().rev().collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tail_chars;
+
+    #[test]
+    fn tail_chars_keeps_full_output_for_minus_one() {
+        assert_eq!(tail_chars("abc", -1), "abc");
+        assert_eq!(tail_chars("", -1), "");
+    }
+
+    #[test]
+    fn tail_chars_returns_empty_for_zero() {
+        assert_eq!(tail_chars("abc", 0), "");
+    }
+
+    #[test]
+    fn tail_chars_keeps_last_n_unicode_chars() {
+        assert_eq!(tail_chars("abc", 2), "bc");
+        assert_eq!(tail_chars("a😀b", 2), "😀b");
+        assert_eq!(tail_chars("a😀b", 1), "b");
+        assert_eq!(tail_chars("abc", 10), "abc");
+    }
 }

@@ -6,9 +6,13 @@
 //!
 //! `deprecated-dirs` / `deprecated-files` are checked before the allow-list.
 //! Deprecated directories match by path-component prefix (`target` does not
-//! block `target2`); deprecated files match exact `abspath`. Windows is case-insensitive.
+//! block `target2`); deprecated files match exact `abspath`.
+//! `deprecated-dir-patterns` globs are applied to a path and all its ancestors.
+//! Windows is case-insensitive.
 
 use std::path::{Component, Path, PathBuf};
+
+use regex::Regex;
 
 /// Allow-lists for directories, exact files and extensions.
 #[derive(Debug, Clone, Default)]
@@ -22,6 +26,8 @@ pub struct Sandbox {
     extensions: Vec<String>,
     deprecated_dirs: Vec<String>,
     deprecated_files: Vec<String>,
+    /// Compiled `tools.fs.deprecated-dir-patterns` regexes.
+    deprecated_dir_patterns: Vec<Regex>,
 }
 
 impl Sandbox {
@@ -33,12 +39,14 @@ impl Sandbox {
         extensions: &[String],
         deprecated_dirs: &[String],
         deprecated_files: &[String],
-    ) -> Self {
+        deprecated_dir_patterns: &[String],
+    ) -> Result<Self, String> {
         let mut sb = Self {
             root: normalize_root(&root),
             extensions: extensions.to_vec(),
             deprecated_dirs: deprecated_dirs.to_vec(),
             deprecated_files: deprecated_files.to_vec(),
+            deprecated_dir_patterns: compile_deprecated_dir_patterns(deprecated_dir_patterns)?,
             r_dirs: Vec::new(),
             w_dirs: Vec::new(),
             r_files: Vec::new(),
@@ -46,7 +54,7 @@ impl Sandbox {
         };
         split_prefixed(available_dirs, &mut sb.r_dirs, &mut sb.w_dirs);
         split_prefixed(available_files, &mut sb.r_files, &mut sb.w_files);
-        sb
+        Ok(sb)
     }
 
     /// Empty allow-list (no `fs` module in conf).
@@ -65,6 +73,7 @@ impl Sandbox {
             extensions: Vec::new(),
             deprecated_dirs: Vec::new(),
             deprecated_files: Vec::new(),
+            deprecated_dir_patterns: Vec::new(),
         }
     }
 
@@ -108,7 +117,7 @@ impl Sandbox {
         let abs_path = self.resolve_in_root(path)?;
         if self.is_deprecated_abs(&abs_path) {
             return Err(format!(
-                "{mode}-access denied to {path} → path is deprecated (excluded by 'deprecated-dirs'/'deprecated-files' in tools.fs; do not use it)"
+                "{mode}-access denied to {path} → path is deprecated (excluded by 'deprecated-dirs'/'deprecated-files'/'deprecated-dir-patterns' in tools.fs; do not use it)"
             ));
         }
         let (dirs, files) = if mode == 'w' {
@@ -182,7 +191,8 @@ impl Sandbox {
         Ok(())
     }
 
-    /// `true` when `path` is a deprecated file or lies inside a deprecated directory.
+    /// `true` when `path` is a deprecated file, lies inside a deprecated
+    /// directory, or matches a deprecated-dir-pattern (including ancestors).
     pub fn is_deprecated(&self, path: &str) -> bool {
         self.resolve_in_root(path)
             .map(|abs_path| self.is_deprecated_abs(&abs_path))
@@ -198,6 +208,13 @@ impl Sandbox {
         }) {
             return true;
         }
+        if self
+            .relative_ancestors(path)
+            .iter()
+            .any(|rel| self.matches_deprecated_pattern(rel))
+        {
+            return true;
+        }
         self.deprecated_dirs.iter().any(|d| {
             self.resolve_in_root(d)
                 .map(|abs_d| {
@@ -206,6 +223,34 @@ impl Sandbox {
                 })
                 .unwrap_or(false)
         })
+    }
+
+    fn relative_ancestors(&self, path: &Path) -> Vec<String> {
+        let Ok(rel) = path.strip_prefix(&self.root) else {
+            return Vec::new();
+        };
+        let parts: Vec<String> = rel
+            .components()
+            .filter_map(|c| match c {
+                Component::Normal(s) => Some(s.to_string_lossy().replace('\\', "/")),
+                _ => None,
+            })
+            .collect();
+        let mut out = Vec::with_capacity(parts.len());
+        for end in 1..=parts.len() {
+            out.push(parts[..end].join("/"));
+        }
+        out
+    }
+
+    fn matches_deprecated_pattern(&self, rel: &str) -> bool {
+        let rel = rel.replace('\\', "/");
+        let rel = if cfg!(windows) {
+            rel.to_lowercase()
+        } else {
+            rel
+        };
+        self.deprecated_dir_patterns.iter().any(|re| re.is_match(&rel))
     }
 
     fn is_allowed_abs(&self, path: &Path, dirs: &[String], files: &[String]) -> bool {
@@ -223,6 +268,20 @@ impl Sandbox {
                 .unwrap_or(false)
         })
     }
+}
+
+fn compile_deprecated_dir_patterns(patterns: &[String]) -> Result<Vec<Regex>, String> {
+    let mut out = Vec::new();
+    for pattern in patterns {
+        let source = conf::glob::regex_source(pattern).map_err(|e| e.to_string())?;
+        let re = Regex::new(&source).map_err(|e| {
+            format!(
+                "invalid 'deprecated-dir-patterns' entry '{pattern}': cannot compile glob pattern: {e}"
+            )
+        })?;
+        out.push(re);
+    }
+    Ok(out)
 }
 
 fn split_prefixed(entries: &[String], r_list: &mut Vec<String>, w_list: &mut Vec<String>) {
@@ -321,4 +380,76 @@ fn comparable_parts(path: &Path) -> Vec<String> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn root() -> PathBuf {
+        std::env::current_dir().unwrap()
+    }
+
+    #[test]
+    fn from_fs_rejects_invalid_deprecated_dir_pattern() {
+        let err = Sandbox::from_fs(
+            root(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &["log/**".to_string()],
+        )
+        .unwrap_err();
+        assert!(err.contains("deprecated-dir-patterns"), "{err}");
+    }
+
+    #[test]
+    fn deprecated_dir_pattern_matches_ancestors_and_self() {
+        let sb = Sandbox::from_fs(
+            root(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &["**/log".to_string()],
+        )
+        .unwrap();
+        assert!(sb.is_deprecated_abs(&root().join("a/log/x.md")));
+        assert!(sb.is_deprecated_abs(&root().join("a/log")));
+        assert!(!sb.is_deprecated_abs(&root().join("a/log2/x.md")));
+    }
+
+    #[test]
+    fn deprecated_dir_pattern_question_mark_is_literal() {
+        let sb = Sandbox::from_fs(
+            root(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &["**/log?".to_string()],
+        )
+        .unwrap();
+        assert!(sb.is_deprecated_abs(&root().join("a/log?")));
+        assert!(!sb.is_deprecated_abs(&root().join("a/log")));
+    }
+
+    #[test]
+    fn deprecated_dir_pattern_matching_is_case_insensitive_only_on_windows() {
+        let sb = Sandbox::from_fs(
+            root(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &["**/Log".to_string()],
+        )
+        .unwrap();
+        assert_eq!(sb.is_deprecated_abs(&root().join("log")), cfg!(windows));
+    }
 }
