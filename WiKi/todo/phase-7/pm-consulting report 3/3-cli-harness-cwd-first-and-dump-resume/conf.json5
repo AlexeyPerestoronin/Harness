@@ -11,13 +11,16 @@
     "tools": {
         "fs": {
             "available-dirs": [
-                "r:.github/workflows",
-                "r:WiKi/todo/phase-7"
+                "w:crates/cli-harness",
+                "w:crates/agent-loop",
+                "r:crates/conf",
+                "r:crates/tools",
+                "r:crates/harness-api",
+                "w:WiKi/todo/phase-7/pm-consulting report 3"
             ],
             "available-file-extensions": [],
             "available-files": [
-                "w:.github/workflows/ci.yml",
-                "r:Cargo.toml"
+                "w:harness.json5"
             ],
             "deprecated-dirs": [
                 ".git",

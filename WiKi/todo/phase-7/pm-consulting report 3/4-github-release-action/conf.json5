@@ -11,17 +11,20 @@
     "tools": {
         "fs": {
             "available-dirs": [
-                "w:crates/tools",
-                "r:crates/conf",
-                "r:WiKi/todo/phase-7"
+                "r:.github/workflows",
+                "w:WiKi/todo/phase-7"
             ],
             "available-file-extensions": [],
-            "available-files": [],
+            "available-files": [
+                "w:.github/workflows/ci.yml",
+                "r:Cargo.toml"
+            ],
             "deprecated-dirs": [
                 ".git",
                 ".log",
                 "target",
                 "crates/web-harness/target",
+                "WiKi/done"
             ],
             "deprecated-dir-patterns": [
                 "**/done"
