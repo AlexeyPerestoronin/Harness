@@ -8,7 +8,8 @@
 // Root object of harness.json5
 // ---------------------------------------------------------------------------
 
-/// Workspace of the agent (tools and logs). Required.
+/// Rejected root key. CWD is set only by the process (`--cwd` or the process
+/// current directory), never by `harness.json5`.
 pub const CWD: &str = "cwd";
 /// Object with model / mode / session limits and log-folder.
 pub const AGENT: &str = "agent";
@@ -16,6 +17,13 @@ pub const AGENT: &str = "agent";
 pub const TOOLS: &str = "tools";
 /// Optional named values substituted before json5 parsing.
 pub const VARS: &str = "vars";
+
+// ---------------------------------------------------------------------------
+// Root validation
+// ---------------------------------------------------------------------------
+
+/// Root keys allowed in `harness.json5`.
+pub const ROOT_KEYS: &[&str] = &[VARS, SERVER, AGENT, TOOLS];
 
 // ---------------------------------------------------------------------------
 // server
@@ -126,6 +134,8 @@ pub const EXTRA_SCOPE: &str = "extra-scope";
 pub const DEPRECATED_DIRS: &str = "deprecated-dirs";
 /// File denylist without `r:` / `w:` prefixes.
 pub const DEPRECATED_FILES: &str = "deprecated-files";
+/// Glob patterns `**/<component>` that deprecate dirs/files at any depth.
+pub const DEPRECATED_DIR_PATTERNS: &str = "deprecated-dir-patterns";
 
 // ---------------------------------------------------------------------------
 // tools.git

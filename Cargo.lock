@@ -259,6 +259,7 @@ name = "conf"
 version = "2.1.0"
 dependencies = [
  "json5",
+ "regex",
  "serde_json",
 ]
 

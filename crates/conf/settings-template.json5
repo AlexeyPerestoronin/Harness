@@ -2,11 +2,9 @@
     // Edit only this section.
     // Named values here are substituted into the rest of this file.
     "vars": {
-        // Agent workspace (tools and logs). Absolute path, or relative to the process cwd.
-        "workspace": "<workspace path>",
         // Path to an agent file or to a folder with agent files (you will be asked to choose).
-        // Relative paths are resolved against the directory of this conf file.
-        "agent-config": "grok-4.6.json5",
+        // Relative paths are resolved against CWD and must stay inside CWD.
+        "agent-config": "harness/agents/grok-4.6.json5",
         // Confirmation mode: "safe" (ask when a limit is exceeded) or "auto-accept" (log and continue).
         "mode": "safe",
         // Session token limit. Number, not a string. -1 = unlimited.
@@ -15,20 +13,18 @@
         "iteration-limit": 50,
         // Session USD limit. Number, not a string. -1 = unlimited.
         "usd-limit": 0.5,
-        // Log folder name, relative to cwd. Session logs go to
+        // Log folder name, relative to CWD. Session logs go to
         // <cwd>/<log-folder>/<YYYY-MM-DD HH-MM>_<vendor>_<model>/.
         "log-folder": ".log",
-        // Working directory for fs tools and run_shell. Absolute, or relative to the process cwd.
-        "work-dir": "<work directory>",
+        // Working directory for fs tools and run_shell, relative to CWD and inside CWD.
+        "work-dir": ".",
         // Path or name of the git binary. Required. The code never falls back to "git".
-        "git-executable": "path to git-executable file",
+        "git-executable": "git",
         // Timeout in seconds for git subprocesses. Number, not a string.
         "execution-limit": 120,
         // Timeout in seconds for run_shell. Number, not a string.
         "command-execution-limit": 120
     },
-    // Workspace of the agent (tools and logs). Must be set explicitly.
-    "cwd": "${vars:workspace}",
     // HTTPS server settings used by `harness.exe --serve`.
     "server": {
         // Bind address. Remote access only with explicit `--host`.
@@ -41,7 +37,8 @@
         "interaction-timeout": 10,
         // Allowed CORS origins. Empty list = CORS disabled. `"*"` is not supported.
         "cors-allowed-origins": [],
-        // Optional PEM certificate path. `null` = auto-generate a self-signed one.
+        // Optional PEM certificate path. Relative paths are resolved from CWD; absolute paths are used as-is.
+        // The path is not required to stay inside CWD. `null` = auto-generate a self-signed one.
         "tls-cert": null,
         // Optional PEM private-key path. Must be set together with `tls-cert`.
         "tls-key": null
@@ -49,7 +46,7 @@
     // Model file, confirmation mode, session limits and log folder.
     "agent": {
         // Path to an agent file or to a folder with agent files (you will be asked to choose).
-        // Relative to the directory of this conf file.
+        // Relative paths are resolved against CWD and must stay inside CWD.
         "config": "${vars:agent-config}",
         // "safe" — confirm when a limit is exceeded; "auto-accept" — log and continue.
         "mode": "${vars:mode}",
@@ -59,7 +56,7 @@
         "iteration-limit": ${vars:iteration-limit},
         // Session USD limit. `-1` = unlimited.
         "USD-limit": ${vars:usd-limit},
-        // Log folder relative to `cwd`. Session logs go to
+        // Log folder relative to CWD and inside CWD. Session logs go to
         // `<cwd>/<log-folder>/<YYYY-MM-DD HH-MM>_<vendor>_<model>/`.
         "log-folder": "${vars:log-folder}"
     },
@@ -72,6 +69,7 @@
         // list_available_r_file, list_available_w_file.
         "fs": {
             // Directory allow-list. Prefix `r:` (read) or `w:` (write; implies read). Match by abspath prefix.
+            // Relative paths are resolved against CWD and must stay inside CWD.
             "available-dirs": [
                 "w:${vars:work-dir}"
             ],
@@ -79,25 +77,32 @@
             "available-file-extensions": [
             ],
             // Exact-file allow-list outside `available-dirs`. Prefixes `r:` / `w:`.
+            // Relative paths are resolved against CWD and must stay inside CWD.
             "available-files": [
             ],
             // Directories skipped by fs tools (build dirs, logs). Empty list is allowed.
             // No `r:` / `w:` prefixes (those mark access mode and are meaningless for a denylist).
-            // Relative paths are resolved against the process cwd (not settings.cwd).
+            // Relative paths are resolved against CWD and must stay inside CWD.
             // An entry that coincides with or contains an `available-*` path is a load error.
             "deprecated-dirs": [
                 ".git",
                 "target"
             ],
             // Files skipped by fs tools. Empty list is allowed.
-            // No `r:` / `w:` prefixes. Relative paths are resolved against the process cwd.
+            // No `r:` / `w:` prefixes. Relative paths are resolved against CWD and must stay inside CWD.
             // Intersection with `available-files` is a load error.
             "deprecated-files": [
+            ],
+            // glob pattern `**/<component>` that deprecates a directory or file with this name at any depth.
+            // Supported syntax: `**/<component>`; the only wildcard is `*`; regex is not supported.
+            // Examples: `**/log`, `**/done`, `**/note-*`.
+            "deprecated-dir-patterns": [
             ]
         },
         // Git tools: is_file_under_git, get_file_diff, apply_diff_patch, discard_file_changes.
         "git": {
             // Path or name of the git binary. Required. The code never falls back to "git".
+            // The value is passed to `Command::new` as-is and is not resolved from CWD.
             "executable": "${vars:git-executable}",
             // Timeout in seconds for git subprocesses.
             "execution-limit": ${vars:execution-limit}
@@ -105,7 +110,7 @@
         // Shell tools: run_shell.
         "terminal": {
             // Allowed cwd values for run_shell (abspath prefix match), separate from `available-dirs`.
-            // Relative entries are resolved against settings.cwd, not the process cwd.
+            // Relative entries are resolved against CWD and must stay inside CWD.
             "cwd-list": [
                 "${vars:work-dir}"
             ],
@@ -122,7 +127,7 @@
         "user": {},
         // Skills catalog. Empty object = module on, no skills.
         // Add an entry as: "<name>": { "description": "<short text>", "file": "<path>" }.
-        // `file` is relative to this conf file's directory, or absolute.
+        // `file` is resolved against CWD and must stay inside CWD, or absolute.
         // Missing files fail conf load (`error → skill-file '...' doesn't find`).
         "skills": {},
         // Roles catalog. Same shape as skills (`description` + `file`).

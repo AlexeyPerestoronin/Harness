@@ -233,9 +233,9 @@ pub struct AgentSession {
 /// Partially loaded server configuration: everything except the chosen agent.
 #[derive(Debug, Clone)]
 pub struct ServerSettings {
-    /// Agent workspace (`cwd` in json5).
+    /// Agent workspace. Set by the caller (`--cwd` or process cwd), never by json5.
     pub cwd: PathBuf,
-    /// Directory of the loaded `--conf` file.
+    /// Directory of the loaded `--conf` file (informational; paths resolve from `cwd`).
     pub conf_dir: PathBuf,
     /// HTTPS server settings.
     pub server: ServerConfig,
@@ -275,9 +275,9 @@ pub struct ResolvedAgent {
 /// Fully resolved harness configuration.
 #[derive(Debug, Clone)]
 pub struct Settings {
-    /// Agent workspace (`cwd` in json5). Tools and logs run from here.
+    /// Agent workspace. Set by the caller (`--cwd` or process cwd), never by json5.
     pub cwd: PathBuf,
-    /// Directory of the loaded `--conf` file (model path is resolved against it).
+    /// Directory of the loaded `--conf` file (informational; paths resolve from `cwd`).
     pub conf_dir: PathBuf,
     /// Relative log folder inside `cwd`.
     pub log_folder: String,
@@ -355,6 +355,8 @@ pub struct FsSettings {
     pub deprecated_dirs: Vec<String>,
     /// File denylist without `r:` / `w:` prefixes. Empty = none excluded.
     pub deprecated_files: Vec<String>,
+    /// Glob patterns `**/<component>` applied to a path and its ancestors.
+    pub deprecated_dir_patterns: Vec<String>,
 }
 
 /// Settings for the `git` module.

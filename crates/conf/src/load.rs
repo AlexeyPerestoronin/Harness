@@ -23,8 +23,8 @@ use serde_json::Value;
 ///
 /// If `agent.config` is a directory this fails with
 /// `agent was not selected`. Use [`load_with`] to choose a candidate.
-pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
-    load_with(conf_path, None, |_| Err("agent was not selected".into()))
+pub fn load(conf_path: &Path, cwd: &Path) -> Result<Settings, ConfError> {
+    load_with(conf_path, cwd, |_| Err("agent was not selected".into()))
 }
 
 /// Load and validate a harness configuration file.
@@ -32,21 +32,14 @@ pub fn load(conf_path: &Path) -> Result<Settings, ConfError> {
 /// When `agent.config` is a **file**, `chooser` is not called.
 /// When it is a **directory**, `chooser` receives the sorted candidate list
 /// and must return a 0-based index. Session limits (`mode`, `token-limit`,
-/// `iteration-limit`, `USD-limit`) always come from `harness.json5`.
-/// `cwd_override` replaces `cwd` from the file (used by `--cwd`).
-pub fn load_with<F>(
-    conf_path: &Path,
-    cwd_override: Option<PathBuf>,
-    chooser: F,
-) -> Result<Settings, ConfError>
+/// `iteration-limit`, `USD-limit`) always come from `harness.json5`. `cwd`
+/// comes from the caller and is the root for every relative config path.
+pub fn load_with<F>(conf_path: &Path, cwd: &Path, chooser: F) -> Result<Settings, ConfError>
 where
     F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
 {
-    let conf_path = if conf_path.is_absolute() {
-        conf_path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(conf_path)
-    };
+    let conf_path = crate::fs_scope::normalize_abs(conf_path);
+    ensure_conf_in_cwd(&conf_path, cwd)?;
     let text = fs::read_to_string(&conf_path).map_err(|e| {
         ConfError::new(format!(
             "cannot read conf file '{}': {e}",
@@ -56,58 +49,53 @@ where
     let text = crate::vars::substitute(&text, &conf_path.display().to_string())?;
     let root: Value = json5::from_str(&text)?;
     expect_object(&root, &conf_path.display().to_string())?;
-    let conf_dir = conf_path
+    let mut settings = load_from_value(root, cwd, chooser)?;
+    settings.conf_dir = conf_path
         .parent()
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    load_from_value(root, &conf_dir, cwd_override, chooser)
+        .unwrap_or_else(|| settings.cwd.clone());
+    Ok(settings)
 }
 
 /// Validate a conf JSON object (already after vars substitution) into [`Settings`].
 ///
-/// `vars` is not substituted again. `conf_dir` resolves a relative `agent.config`.
-/// `cwd_override` replaces `cwd` from `root`; relative paths use `conf_dir`.
+/// `vars` is not substituted again. `cwd` comes from the caller and is the
+/// root for every relative path. [`Settings::conf_dir`] is set to `cwd`;
+/// file-based loaders may overwrite it with the config file directory.
 /// After a successful load, [`Settings::source`] is `root` with `agent.config`
 /// rewritten to the absolute chosen agent file.
 pub fn load_from_value<F>(
     mut root: Value,
-    conf_dir: &Path,
-    cwd_override: Option<PathBuf>,
+    cwd: &Path,
     mut chooser: F,
 ) -> Result<Settings, ConfError>
 where
     F: FnMut(&[AgentCandidate]) -> Result<usize, String>,
 {
-    let (cwd, log_folder, agent, tools) = {
+    let cwd = crate::fs_scope::normalize_abs(cwd);
+    let (log_folder, agent, tools) = {
         let obj = expect_object(&root, "settings")?;
-        let cwd = match cwd_override {
-            Some(raw) => resolve_cwd_path(&raw, conf_dir)?,
-            None => {
-                let raw = required_string(obj, keys::CWD)?;
-                resolve_cwd(&raw, conf_dir)?
-            }
-        };
+        validate_root_keys(obj)?;
 
         let agent_raw = obj
             .get(keys::AGENT)
             .ok_or_else(|| ConfError::new(format!("missing '{}'", keys::AGENT)))?;
         let agent_obj = expect_object(agent_raw, keys::AGENT)?;
-        let log_folder = log_folder_from_agent(agent_obj)?;
-        let agent = load_agent(agent_obj, conf_dir, &mut chooser)?;
+        let log_folder = log_folder_from_agent(agent_obj, &cwd)?;
+        let agent = load_agent(agent_obj, &cwd, &mut chooser)?;
 
         let tools = match obj.get(keys::TOOLS) {
-            Some(v) => load_tools(expect_object(v, keys::TOOLS)?, conf_dir, &cwd)?,
+            Some(v) => load_tools(expect_object(v, keys::TOOLS)?, &cwd)?,
             None => ToolsSettings::default(),
         };
-        (cwd, log_folder, agent, tools)
+        (log_folder, agent, tools)
     };
 
     rewrite_agent_config(&mut root, &agent.config_path);
 
     Ok(Settings {
-        cwd,
-        conf_dir: conf_dir.to_path_buf(),
+        cwd: cwd.clone(),
+        conf_dir: cwd,
         log_folder,
         agent,
         tools,
@@ -120,12 +108,9 @@ where
 /// Returns [`ServerConfigState::Missing`] when the file does not exist and
 /// [`ServerConfigState::Invalid`] for parse / validation errors. Unexpected IO
 /// errors (for example permission denied) are returned as `Err`.
-pub fn load_server_config(conf_path: &Path) -> Result<ServerConfigState, ConfError> {
-    let conf_path = if conf_path.is_absolute() {
-        conf_path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(conf_path)
-    };
+pub fn load_server_config(conf_path: &Path, cwd: &Path) -> Result<ServerConfigState, ConfError> {
+    let conf_path = crate::fs_scope::normalize_abs(conf_path);
+    ensure_conf_in_cwd(&conf_path, cwd)?;
     match fs::metadata(&conf_path) {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -160,13 +145,15 @@ pub fn load_server_config(conf_path: &Path) -> Result<ServerConfigState, ConfErr
             })
         }
     };
-    let conf_dir = conf_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
 
-    match server_settings_from_value(root, &conf_dir) {
-        Ok(settings) => Ok(ServerConfigState::Ok(settings)),
+    match server_settings_from_value(root, cwd) {
+        Ok(mut settings) => {
+            settings.conf_dir = conf_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| settings.cwd.clone());
+            Ok(ServerConfigState::Ok(settings))
+        }
         Err(e) => Ok(ServerConfigState::Invalid {
             message: e.to_string(),
         }),
@@ -201,6 +188,7 @@ pub fn resolve_agent_for_run(
         )),
         model_path.clone(),
         api_key_override,
+        &settings.cwd,
     )?;
     Ok(ResolvedAgent {
         agent,
@@ -208,78 +196,79 @@ pub fn resolve_agent_for_run(
     })
 }
 
-fn resolve_cwd(raw: &str, conf_dir: &Path) -> Result<PathBuf, ConfError> {
-    if raw.trim().is_empty() {
+/// Resolve a config path against `cwd` and require the result to stay inside it.
+///
+/// Relative paths are joined onto `cwd`; absolute paths are kept as-is. The
+/// result is lexically normalized and checked by path components.
+pub(crate) fn resolve_in_cwd(raw: &str, cwd: &Path) -> Result<PathBuf, ConfError> {
+    let cwd = crate::fs_scope::normalize_abs(cwd);
+    let raw = raw.replace('\\', "/");
+    let raw_path = Path::new(&raw);
+    let joined = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        cwd.join(raw_path)
+    };
+    let absolute = crate::fs_scope::normalize_lexical(&joined);
+    if !is_within_cwd(&absolute, &cwd) {
         return Err(ConfError::new(format!(
-            "'{}' must be set explicitly",
-            keys::CWD
+            "path '{}' resolves outside of cwd '{}'",
+            raw,
+            cwd.display()
         )));
     }
-    resolve_cwd_path(Path::new(raw), conf_dir)
+    Ok(absolute)
 }
 
-fn resolve_cwd_path(raw: &Path, conf_dir: &Path) -> Result<PathBuf, ConfError> {
-    if raw.as_os_str().is_empty() {
+fn ensure_conf_in_cwd(conf_path: &Path, cwd: &Path) -> Result<(), ConfError> {
+    if !is_within_cwd(conf_path, &crate::fs_scope::normalize_abs(cwd)) {
         return Err(ConfError::new(format!(
-            "'{}' must be set explicitly",
-            keys::CWD
+            "conf file '{}' is outside of cwd '{}'",
+            conf_path.display(),
+            cwd.display()
         )));
     }
-    let base = if conf_dir.is_absolute() {
-        conf_dir.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(conf_dir)
-    };
-    let absolute = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        base.join(raw)
-    };
-    normalize_abs(&absolute)
+    Ok(())
 }
 
-fn normalize_abs(path: &Path) -> Result<PathBuf, ConfError> {
-    use std::path::Component;
+fn is_within_cwd(path: &Path, cwd: &Path) -> bool {
+    let path = crate::fs_scope::comparable_parts(path);
+    let cwd = crate::fs_scope::comparable_parts(cwd);
+    path.len() >= cwd.len() && path.starts_with(&cwd)
+}
 
-    if !path.is_absolute() {
-        return Err(ConfError::new(format!(
-            "'{}' must be an absolute path",
-            keys::CWD
-        )));
-    }
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Normal(name) => normalized.push(name),
+fn validate_root_keys(obj: &serde_json::Map<String, Value>) -> Result<(), ConfError> {
+    for key in obj.keys() {
+        if key == keys::CWD {
+            return Err(ConfError::new(format!(
+                "'{}' is no longer set in the config; use '--cwd' or run the process from the target directory",
+                keys::CWD
+            )));
+        }
+        if !keys::ROOT_KEYS.contains(&key.as_str()) {
+            return Err(ConfError::new(format!("unknown root key '{key}'")));
         }
     }
-    if normalized.as_os_str().is_empty() {
-        return Err(ConfError::new(format!(
-            "'{}' must be set explicitly",
-            keys::CWD
-        )));
-    }
-    Ok(normalized)
+    Ok(())
 }
 
-fn server_settings_from_value(root: Value, conf_dir: &Path) -> Result<ServerSettings, ConfError> {
+fn strip_rw_prefix(entry: &str) -> &str {
+    entry
+        .strip_prefix("r:")
+        .or_else(|| entry.strip_prefix("w:"))
+        .unwrap_or(entry)
+}
+
+fn server_settings_from_value(root: Value, cwd: &Path) -> Result<ServerSettings, ConfError> {
+    let cwd = crate::fs_scope::normalize_abs(cwd);
     let obj = expect_object(&root, "settings")?;
-    let cwd = {
-        let raw = required_string(obj, keys::CWD)?;
-        resolve_cwd(&raw, conf_dir)?
-    };
+    validate_root_keys(obj)?;
     let server = match obj.get(keys::SERVER) {
-        Some(v) => load_server(expect_object(v, keys::SERVER)?)?,
+        Some(v) => load_server(expect_object(v, keys::SERVER)?, &cwd)?,
         None => ServerConfig::default(),
     };
     let tools = match obj.get(keys::TOOLS) {
-        Some(v) => load_tools(expect_object(v, keys::TOOLS)?, conf_dir, &cwd)?,
+        Some(v) => load_tools(expect_object(v, keys::TOOLS)?, &cwd)?,
         None => ToolsSettings::default(),
     };
 
@@ -291,10 +280,10 @@ fn server_settings_from_value(root: Value, conf_dir: &Path) -> Result<ServerSett
     let token_limit = required_i64(agent_obj, keys::TOKEN_LIMIT)?;
     let iteration_limit = required_i64(agent_obj, keys::ITERATION_LIMIT)?;
     let usd_limit = required_f64(agent_obj, keys::USD_LIMIT)?;
-    let log_folder = log_folder_from_agent(agent_obj)?;
+    let log_folder = log_folder_from_agent(agent_obj, &cwd)?;
 
     let config_rel = required_string(agent_obj, keys::CONFIG)?;
-    let source_path = resolve_conf_path(conf_dir, &config_rel)?;
+    let source_path = resolve_in_cwd(&config_rel, &cwd)?;
     let agent_source = if source_path.is_dir() {
         let (candidates, skipped) = scan_agent_dir(&source_path)?;
         report_skipped(&skipped);
@@ -313,8 +302,8 @@ fn server_settings_from_value(root: Value, conf_dir: &Path) -> Result<ServerSett
     };
 
     Ok(ServerSettings {
-        cwd,
-        conf_dir: conf_dir.to_path_buf(),
+        cwd: cwd.clone(),
+        conf_dir: cwd,
         server,
         agent_source,
         agent_session: AgentSession {
@@ -329,7 +318,10 @@ fn server_settings_from_value(root: Value, conf_dir: &Path) -> Result<ServerSett
     })
 }
 
-fn load_server(obj: &serde_json::Map<String, Value>) -> Result<ServerConfig, ConfError> {
+fn load_server(
+    obj: &serde_json::Map<String, Value>,
+    cwd: &Path,
+) -> Result<ServerConfig, ConfError> {
     reject_unknown_keys(
         obj,
         &[
@@ -360,8 +352,8 @@ fn load_server(obj: &serde_json::Map<String, Value>) -> Result<ServerConfig, Con
     if let Some(v) = obj.get(keys::CORS_ALLOWED_ORIGINS) {
         server.cors_allowed_origins = parse_cors_origins(v)?;
     }
-    server.tls_cert = parse_tls_path(obj.get(keys::TLS_CERT), keys::TLS_CERT)?;
-    server.tls_key = parse_tls_path(obj.get(keys::TLS_KEY), keys::TLS_KEY)?;
+    server.tls_cert = parse_tls_path(obj.get(keys::TLS_CERT), keys::TLS_CERT, cwd)?;
+    server.tls_key = parse_tls_path(obj.get(keys::TLS_KEY), keys::TLS_KEY, cwd)?;
     if server.tls_cert.is_some() != server.tls_key.is_some() {
         return Err(ConfError::new(format!(
             "'{}' and '{}' must be set together or both be null",
@@ -417,10 +409,22 @@ fn parse_cors_origins(value: &Value) -> Result<Vec<String>, ConfError> {
     Ok(origins)
 }
 
-fn parse_tls_path(value: Option<&Value>, key: &str) -> Result<Option<PathBuf>, ConfError> {
+fn parse_tls_path(
+    value: Option<&Value>,
+    key: &str,
+    cwd: &Path,
+) -> Result<Option<PathBuf>, ConfError> {
     match value {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(s)) => Ok(Some(PathBuf::from(s))),
+        Some(Value::String(s)) => {
+            let path = PathBuf::from(s);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            };
+            Ok(Some(crate::fs_scope::normalize_lexical(&path)))
+        }
         Some(_) => Err(ConfError::new(format!("'{key}' must be a string or null"))),
     }
 }
@@ -479,21 +483,6 @@ fn rewrite_agent_config(root: &mut Value, config_path: &Path) {
     }
 }
 
-/// Load a model json5 file into [`AgentSettings`].
-///
-/// `mode` is not a model-file field; the caller supplies it.
-/// `token_limit` and `usd_limit` come from `limits`. `iteration_limit` is
-/// always `-1`: session iterations live only in `harness.json5`.
-pub fn load_model(model_path: &Path, mode: Mode) -> Result<AgentSettings, ConfError> {
-    let model_path = if model_path.is_absolute() {
-        model_path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(model_path)
-    };
-    let model_obj = read_model_object(&model_path)?;
-    settings_from_model(&model_obj, mode, None, model_path)
-}
-
 fn read_model_object(model_path: &Path) -> Result<serde_json::Map<String, Value>, ConfError> {
     let model_text = fs::read_to_string(model_path).map_err(|e| {
         ConfError::new(format!(
@@ -508,7 +497,7 @@ fn read_model_object(model_path: &Path) -> Result<serde_json::Map<String, Value>
 
 fn load_agent<F>(
     agent_obj: &serde_json::Map<String, Value>,
-    conf_dir: &Path,
+    cwd: &Path,
     chooser: &mut F,
 ) -> Result<AgentSettings, ConfError>
 where
@@ -521,23 +510,11 @@ where
     let iteration_limit = required_i64(agent_obj, keys::ITERATION_LIMIT)?;
     let usd_limit = required_f64(agent_obj, keys::USD_LIMIT)?;
 
-    let model_path = {
-        let p = PathBuf::from(&config_rel);
-        if p.is_absolute() {
-            p
-        } else {
-            conf_dir.join(p)
-        }
-    };
+    let model_path = resolve_in_cwd(&config_rel, cwd)?;
     let model_path = if model_path.is_dir() {
         choose_from_dir(&model_path, chooser)?
     } else {
         model_path
-    };
-    let model_path = if model_path.is_absolute() {
-        model_path
-    } else {
-        std::env::current_dir()?.join(model_path)
     };
     let model_obj = match read_model_object(&model_path) {
         Ok(obj) => obj,
@@ -555,6 +532,7 @@ where
         mode,
         Some((token_limit, iteration_limit, usd_limit)),
         model_path,
+        cwd,
     )
 }
 
@@ -599,8 +577,9 @@ fn settings_from_model(
     mode: Mode,
     session_limits: Option<(i64, i64, f64)>,
     config_path: PathBuf,
+    cwd: &Path,
 ) -> Result<AgentSettings, ConfError> {
-    let api_key = resolve_api_key(model_obj)?;
+    let api_key = resolve_api_key(model_obj, cwd)?;
     build_agent_settings(model_obj, mode, session_limits, config_path, api_key)
 }
 
@@ -610,8 +589,9 @@ fn settings_from_model_for_run(
     session_limits: Option<(i64, i64, f64)>,
     config_path: PathBuf,
     api_key_override: Option<&str>,
+    cwd: &Path,
 ) -> Result<AgentSettings, ConfError> {
-    let api_key = resolve_api_key_for_run(model_obj, api_key_override)?;
+    let api_key = resolve_api_key_for_run(model_obj, api_key_override, cwd)?;
     build_agent_settings(model_obj, mode, session_limits, config_path, api_key)
 }
 
@@ -649,7 +629,10 @@ fn build_agent_settings(
     })
 }
 
-fn resolve_api_key(model_obj: &serde_json::Map<String, Value>) -> Result<String, ConfError> {
+fn resolve_api_key(
+    model_obj: &serde_json::Map<String, Value>,
+    cwd: &Path,
+) -> Result<String, ConfError> {
     let raw = match model_obj.get(keys::API_KEY) {
         None => {
             return Err(ConfError::new(format!(
@@ -663,12 +646,13 @@ fn resolve_api_key(model_obj: &serde_json::Map<String, Value>) -> Result<String,
     if trimmed.is_empty() {
         return Ok(String::new());
     }
-    resolve_api_key_value(trimmed)
+    resolve_api_key_value(trimmed, cwd)
 }
 
 fn resolve_api_key_for_run(
     model_obj: &serde_json::Map<String, Value>,
     api_key_override: Option<&str>,
+    cwd: &Path,
 ) -> Result<String, ConfError> {
     if let Some(raw) = api_key_override {
         return Ok(raw.trim().to_string());
@@ -681,19 +665,21 @@ fn resolve_api_key_for_run(
             if trimmed.is_empty() {
                 Ok(String::new())
             } else {
-                resolve_api_key_value(trimmed)
+                resolve_api_key_value(trimmed, cwd)
             }
         }
     }
 }
 
-fn resolve_api_key_value(trimmed: &str) -> Result<String, ConfError> {
+fn resolve_api_key_value(trimmed: &str, cwd: &Path) -> Result<String, ConfError> {
     let candidate = PathBuf::from(trimmed);
+    let cwd = crate::fs_scope::normalize_abs(cwd);
     let path = if candidate.is_absolute() {
         candidate
     } else {
-        std::env::current_dir()?.join(candidate)
+        cwd.join(candidate)
     };
+    let path = crate::fs_scope::normalize_lexical(&path);
     if path.is_file() {
         let contents = fs::read_to_string(&path).map_err(|e| {
             ConfError::new(format!(
@@ -708,7 +694,6 @@ fn resolve_api_key_value(trimmed: &str) -> Result<String, ConfError> {
 }
 fn load_tools(
     obj: &serde_json::Map<String, Value>,
-    conf_dir: &Path,
     cwd: &Path,
 ) -> Result<ToolsSettings, ConfError> {
     let mut settings = ToolsSettings::default();
@@ -719,13 +704,13 @@ fn load_tools(
         } else if name == keys::TOOL_GIT {
             settings.git = Some(load_git(module)?);
         } else if name == keys::TOOL_TERMINAL {
-            settings.terminal = Some(load_terminal(module)?);
+            settings.terminal = Some(load_terminal(module, cwd)?);
         } else if name == keys::TOOL_USER {
             settings.user = Some(UserSettings {});
         } else if name == keys::TOOL_SKILLS {
-            settings.skills = Some(load_skills(module, conf_dir)?);
+            settings.skills = Some(load_skills(module, cwd)?);
         } else if name == keys::TOOL_ROLES {
-            settings.roles = Some(load_roles(module, conf_dir)?);
+            settings.roles = Some(load_roles(module, cwd)?);
         } else {
             return Err(ConfError::new(format!("unknown tool module '{name}'")));
         }
@@ -746,6 +731,30 @@ fn load_fs(obj: &serde_json::Map<String, Value>, cwd: &Path) -> Result<FsSetting
     let available_files = optional_string_list(obj, keys::AVAILABLE_FILES)?;
     let deprecated_dirs = required_deprecated_list(obj, keys::DEPRECATED_DIRS)?;
     let deprecated_files = required_deprecated_list(obj, keys::DEPRECATED_FILES)?;
+    let deprecated_dir_patterns = optional_string_list(obj, keys::DEPRECATED_DIR_PATTERNS)?;
+
+    for item in &available_dirs {
+        resolve_in_cwd(strip_rw_prefix(item), cwd)?;
+    }
+    for item in &available_files {
+        resolve_in_cwd(strip_rw_prefix(item), cwd)?;
+    }
+    for item in &deprecated_dirs {
+        resolve_in_cwd(item, cwd)?;
+    }
+    for item in &deprecated_files {
+        resolve_in_cwd(item, cwd)?;
+    }
+    for pattern in &deprecated_dir_patterns {
+        let source = crate::glob::regex_source(pattern)?;
+        regex::Regex::new(&source).map_err(|e| {
+            ConfError::new(format!(
+                "invalid '{}' entry '{pattern}': cannot compile glob pattern: {e}",
+                keys::DEPRECATED_DIR_PATTERNS
+            ))
+        })?;
+    }
+
     crate::fs_scope::check_conflicts(
         cwd,
         &available_dirs,
@@ -759,6 +768,7 @@ fn load_fs(obj: &serde_json::Map<String, Value>, cwd: &Path) -> Result<FsSetting
         available_files,
         deprecated_dirs,
         deprecated_files,
+        deprecated_dir_patterns,
     })
 }
 
@@ -778,9 +788,16 @@ fn load_git(obj: &serde_json::Map<String, Value>) -> Result<GitSettings, ConfErr
     })
 }
 
-fn load_terminal(obj: &serde_json::Map<String, Value>) -> Result<TerminalSettings, ConfError> {
+fn load_terminal(
+    obj: &serde_json::Map<String, Value>,
+    cwd: &Path,
+) -> Result<TerminalSettings, ConfError> {
+    let cwd_list = optional_string_list(obj, keys::CWD_LIST)?
+        .iter()
+        .map(|item| resolve_in_cwd(item, cwd).map(|path| path.to_string_lossy().into_owned()))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(TerminalSettings {
-        cwd_list: optional_string_list(obj, keys::CWD_LIST)?,
+        cwd_list,
         available_commands: optional_string_list(obj, keys::AVAILABLE_COMMANDS)?,
         command_execution_limit: required_u64(obj, keys::COMMAND_EXECUTION_LIMIT)?,
     })
@@ -788,9 +805,9 @@ fn load_terminal(obj: &serde_json::Map<String, Value>) -> Result<TerminalSetting
 
 fn load_skills(
     obj: &serde_json::Map<String, Value>,
-    conf_dir: &Path,
+    cwd: &Path,
 ) -> Result<SkillsSettings, ConfError> {
-    let items = load_named_files(obj, conf_dir, "skill")?
+    let items = load_named_files(obj, cwd, "skill")?
         .into_iter()
         .map(|(name, (description, file))| (name, SkillEntry { description, file }))
         .collect();
@@ -799,9 +816,9 @@ fn load_skills(
 
 fn load_roles(
     obj: &serde_json::Map<String, Value>,
-    conf_dir: &Path,
+    cwd: &Path,
 ) -> Result<RolesSettings, ConfError> {
-    let items = load_named_files(obj, conf_dir, "role")?
+    let items = load_named_files(obj, cwd, "role")?
         .into_iter()
         .map(|(name, (description, file))| (name, RoleEntry { description, file }))
         .collect();
@@ -810,7 +827,7 @@ fn load_roles(
 
 fn load_named_files(
     obj: &serde_json::Map<String, Value>,
-    conf_dir: &Path,
+    cwd: &Path,
     kind: &str,
 ) -> Result<BTreeMap<String, (String, PathBuf)>, ConfError> {
     let mut items = BTreeMap::new();
@@ -840,7 +857,7 @@ fn load_named_files(
                 keys::FILE
             )));
         }
-        let file = resolve_conf_path(conf_dir, &file_raw)?;
+        let file = resolve_in_cwd(&file_raw, cwd)?;
         if !file.is_file() {
             return Err(ConfError::new(format!(
                 "error → {kind}-file '{}' doesn't find",
@@ -859,22 +876,11 @@ fn is_catalog_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
-fn resolve_conf_path(conf_dir: &Path, raw: &str) -> Result<PathBuf, ConfError> {
-    let path = PathBuf::from(raw);
-    let path = if path.is_absolute() {
-        path
-    } else {
-        conf_dir.join(path)
-    };
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Ok(std::env::current_dir()?.join(path))
-    }
-}
-
-fn log_folder_from_agent(agent_obj: &serde_json::Map<String, Value>) -> Result<String, ConfError> {
-    match agent_obj.get(keys::LOG_FOLDER) {
+fn log_folder_from_agent(
+    agent_obj: &serde_json::Map<String, Value>,
+    cwd: &Path,
+) -> Result<String, ConfError> {
+    let folder = match agent_obj.get(keys::LOG_FOLDER) {
         Some(v) => {
             let s = expect_string(v, keys::LOG_FOLDER)?;
             if s.is_empty() {
@@ -883,10 +889,12 @@ fn log_folder_from_agent(agent_obj: &serde_json::Map<String, Value>) -> Result<S
                     keys::LOG_FOLDER
                 )));
             }
-            Ok(s)
+            s
         }
-        None => Ok(keys::DEFAULT_LOG_FOLDER.to_string()),
-    }
+        None => keys::DEFAULT_LOG_FOLDER.to_string(),
+    };
+    resolve_in_cwd(&folder, cwd)?;
+    Ok(folder)
 }
 
 fn expect_object<'a>(
@@ -1212,4 +1220,3 @@ fn strict_f64(value: &Value) -> Option<f64> {
         _ => None,
     }
 }
-

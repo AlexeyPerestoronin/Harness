@@ -29,19 +29,19 @@ pub(crate) fn check_conflicts(
     let a_dirs: Vec<_> = available_dirs
         .iter()
         .map(|e| resolve_available(e, cwd))
-        .collect();
+        .collect::<Result<_, _>>()?;
     let a_files: Vec<_> = available_files
         .iter()
         .map(|e| resolve_available(e, cwd))
-        .collect();
+        .collect::<Result<_, _>>()?;
     let d_dirs: Vec<_> = deprecated_dirs
         .iter()
         .map(|e| resolve_deprecated(e, cwd))
-        .collect();
+        .collect::<Result<_, _>>()?;
     let d_files: Vec<_> = deprecated_files
         .iter()
         .map(|e| resolve_deprecated(e, cwd))
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     let mut lines = Vec::new();
     for a in &a_dirs {
@@ -124,23 +124,23 @@ fn conflict_line(
     )
 }
 
-fn resolve_available(entry: &str, cwd: &Path) -> ResolvedPath {
+fn resolve_available(entry: &str, cwd: &Path) -> Result<ResolvedPath, ConfError> {
     resolve_raw(entry, strip_rw_prefix(entry), cwd)
 }
 
-fn resolve_deprecated(entry: &str, cwd: &Path) -> ResolvedPath {
+fn resolve_deprecated(entry: &str, cwd: &Path) -> Result<ResolvedPath, ConfError> {
     resolve_raw(entry, entry, cwd)
 }
 
-fn resolve_raw(original: &str, path: &str, cwd: &Path) -> ResolvedPath {
-    let abs = lexical_abspath(cwd, path);
+fn resolve_raw(original: &str, path: &str, cwd: &Path) -> Result<ResolvedPath, ConfError> {
+    let abs = crate::load::resolve_in_cwd(path, cwd)?;
     let resolved = abs.to_string_lossy().replace('\\', "/");
     let parts = comparable_parts(&abs);
-    ResolvedPath {
+    Ok(ResolvedPath {
         original: original.to_string(),
         resolved,
         parts,
-    }
+    })
 }
 
 fn strip_rw_prefix(entry: &str) -> &str {
@@ -150,21 +150,7 @@ fn strip_rw_prefix(entry: &str) -> &str {
         .unwrap_or(entry)
 }
 
-/// Join with the root CWD and normalize `.` / `..` without touching the filesystem.
-/// `\` and `/` are treated as the same separator.
-fn lexical_abspath(cwd: &Path, path: &str) -> PathBuf {
-    let cwd = normalize_abs(cwd);
-    let normalized = path.replace('\\', "/");
-    let path = Path::new(&normalized);
-    let joined = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    normalize_lexical(&joined)
-}
-
-fn normalize_abs(path: &Path) -> PathBuf {
+pub(crate) fn normalize_abs(path: &Path) -> PathBuf {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -175,7 +161,7 @@ fn normalize_abs(path: &Path) -> PathBuf {
     normalize_lexical(&joined)
 }
 
-fn normalize_lexical(path: &Path) -> PathBuf {
+pub(crate) fn normalize_lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in path.components() {
         match c {
@@ -191,7 +177,7 @@ fn normalize_lexical(path: &Path) -> PathBuf {
     out
 }
 
-fn comparable_parts(path: &Path) -> Vec<String> {
+pub(crate) fn comparable_parts(path: &Path) -> Vec<String> {
     path.components()
         .filter_map(|c| match c {
             Component::Prefix(p) => Some(cmp_component(&p.as_os_str().to_string_lossy())),
