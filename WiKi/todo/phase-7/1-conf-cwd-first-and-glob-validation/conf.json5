@@ -1,0 +1,64 @@
+{
+    // Agent-loop config for task execution (phase-6 schema).
+    "cwd": "C:/MyLife/Harness",
+    "agent": {
+        "config": "C:/MyLife/Harness/harness/agents/grok-4.6.json5",
+        "mode": "auto-accept",
+        "token-limit": 256000,
+        "iteration-limit": 40,
+        "USD-limit": 2.0,
+        "log-folder": ".log"
+    },
+    "tools": {
+        "fs": {
+            "available-dirs": [
+                "w:C:/MyLife/Harness/crates/conf",
+                "r:C:/MyLife/Harness/WiKi/todo/phase-7"
+            ],
+            "available-file-extensions": [],
+            "available-files": [
+                "w:C:/MyLife/Harness/Cargo.lock"
+            ],
+            "deprecated-dirs": [
+                "C:/MyLife/Harness/.git",
+                "C:/MyLife/Harness/.log",
+                "C:/MyLife/Harness/target",
+                "C:/MyLife/Harness/crates/web-harness/target",
+                "C:/MyLife/Harness/WiKi/done"
+            ],
+            "deprecated-files": []
+        },
+        "git": {
+            "executable": "git",
+            "execution-limit": 120
+        },
+        "terminal": {
+            "cwd-list": [
+                "."
+            ],
+            "available-commands": [
+                "git",
+                "cargo",
+                "trunk"
+            ],
+            "command-execution-limit": 300
+        },
+        "user": {},
+        "roles": {
+            "senior-developer": {
+                "description": "Применяется при разработке кода",
+                "file": "C:/MyLife/Harness/harness/roles/senior-developer.md"
+            }
+        },
+        "skills": {
+            "rust-programming": {
+                "description": "Написание кода на Rust",
+                "file": "C:/MyLife/Harness/harness/skills/rust-programming.md"
+            },
+            "bugfixing": {
+                "description": "Исправление багов и отладка",
+                "file": "C:/MyLife/Harness/harness/skills/bugfixing.md"
+            }
+        }
+    }
+}
