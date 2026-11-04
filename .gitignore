@@ -6,6 +6,5 @@ dist/
 API_KEY*
 agent-*.json5
 .log
-*harness*.exe
-*harness*.json5
+*harness*.*
 prompt.md
