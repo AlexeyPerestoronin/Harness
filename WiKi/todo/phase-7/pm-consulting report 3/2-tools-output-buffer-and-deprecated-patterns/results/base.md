@@ -80,3 +80,28 @@
   - `Sandbox::from_fs` с невалидным паттерном возвращает `Err`, а не паникует;
   - `is_deprecated_abs`: `**/log` матчит `a/log`, `a/log/x.md`; `**/log?` матчит литеральный `log?`, а не `log`;
   - на Windows `**/Log` запрещает `log`; на Unix — нет.
+
+## Исправление ошибок компиляции workspace
+
+### Было
+
+- В `crates/agent-loop/src/agent_loop.rs` вызов `ToolRegistry::build(...)` оборачивался в `Arc::new(...)` без учёта нового fallible-контракта, из-за чего `registry` имел тип `Arc<Result<ToolRegistry, String>>` и `cargo build --workspace` падал с ошибками E0308.
+
+### Стало
+
+- Результат `ToolRegistry::build(...)` пробрасывается из `AgentLoop::new` через `?`:
+  ```rust
+  let registry = Arc::new(ToolRegistry::build(
+      &tools,
+      ToolsContext { ... },
+  )?);
+  ```
+
+### Почему
+
+- `ToolRegistry::build` стал fallible по плану phase-7; вызывающий код обязан обработать `Result`, чтобы ошибка конструирования реестра (например, невалидный `deprecated-dir-patterns`) корректно возвращалась наружу, а не порождала ошибку типов.
+
+### Проверка
+
+- `cargo build --workspace` — успешно, без ошибок и предупреждений.
+- `cargo test --workspace` — все тесты проходят.

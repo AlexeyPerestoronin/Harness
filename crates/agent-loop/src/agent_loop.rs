@@ -82,7 +82,7 @@ impl AgentLoop {
                 temp_dir: session_dir,
                 interaction: interaction.clone(),
             },
-        ));
+        )?);
         let boxed_agent: Box<dyn Agent> = match &agent.kind {
             AgentKind::Xai { .. } => {
                 Box::new(XaiAgent::new(registry, interaction.clone(), &agent)?)
