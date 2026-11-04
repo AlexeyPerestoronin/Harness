@@ -1,8 +1,7 @@
 {
     // Agent-loop config for task execution (phase-6 schema).
-    "cwd": "C:/MyLife/Harness",
     "agent": {
-        "config": "C:/MyLife/Harness/harness/agents/grok-4.6.json5",
+        "config": "harness/agents",
         "mode": "auto-accept",
         "token-limit": 256000,
         "iteration-limit": 40,
@@ -12,23 +11,26 @@
     "tools": {
         "fs": {
             "available-dirs": [
-                "w:C:/MyLife/Harness/crates/cli-harness",
-                "w:C:/MyLife/Harness/crates/agent-loop",
-                "r:C:/MyLife/Harness/crates/conf",
-                "r:C:/MyLife/Harness/crates/tools",
-                "r:C:/MyLife/Harness/crates/harness-api",
-                "r:C:/MyLife/Harness/WiKi/todo/phase-7"
+                "w:crates/cli-harness",
+                "w:crates/agent-loop",
+                "r:crates/conf",
+                "r:crates/tools",
+                "r:crates/harness-api",
+                "r:WiKi/todo/phase-7"
             ],
             "available-file-extensions": [],
             "available-files": [
-                "w:C:/MyLife/Harness/harness.json5"
+                "w:harness.json5"
             ],
             "deprecated-dirs": [
-                "C:/MyLife/Harness/.git",
-                "C:/MyLife/Harness/.log",
-                "C:/MyLife/Harness/target",
-                "C:/MyLife/Harness/crates/web-harness/target",
-                "C:/MyLife/Harness/WiKi/done"
+                ".git",
+                ".log",
+                "target",
+                "crates/web-harness/target",
+                "WiKi/done"
+            ],
+            "deprecated-dir-patterns": [
+                "**/done"
             ],
             "deprecated-files": []
         },
@@ -41,7 +43,10 @@
                 "."
             ],
             "available-commands": [
-                "git",
+                "git diff",
+                "git status",
+                "git add",
+                "git commit",
                 "cargo",
                 "trunk"
             ],
@@ -51,17 +56,17 @@
         "roles": {
             "senior-developer": {
                 "description": "Применяется при разработке кода",
-                "file": "C:/MyLife/Harness/harness/roles/senior-developer.md"
+                "file": "harness/roles/senior-developer.md"
             }
         },
         "skills": {
             "rust-programming": {
                 "description": "Написание кода на Rust",
-                "file": "C:/MyLife/Harness/harness/skills/rust-programming.md"
+                "file": "harness/skills/rust-programming.md"
             },
             "bugfixing": {
                 "description": "Исправление багов и отладка",
-                "file": "C:/MyLife/Harness/harness/skills/bugfixing.md"
+                "file": "harness/skills/bugfixing.md"
             }
         }
     }
