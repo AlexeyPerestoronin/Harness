@@ -11,8 +11,8 @@
         "rpd": -1,
     },
     "price": {
-        "input-price": 0.66, // USD per 1_000_000 input tokens
-        "output-price": 1.98, // USD per 1_000_000 output tokens
+        "input-price": 1.0, // USD per 1_000_000 input tokens
+        "output-price": 2.0, // USD per 1_000_000 output tokens
         "cached-price": -1, // -1 = free
     },
 }
