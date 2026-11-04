@@ -164,7 +164,7 @@ flowchart TD
   - `load_fs(obj, cwd)` после снятия `r:`/`w:` префиксов проверяет каждый
     путь через `resolve_in_cwd`.
   - `log_folder_from_agent` остаётся строкой, но её значение дополнительно
-    проверяется через `resolve_in_cwd(cwd, log_folder)`.
+    проверяется через `resolve_in_cwd(log_folder, cwd)`.
   - `parse_tls_path`: относительный TLS-путь резолвится от `cwd`, но **не**
     проверяется на «внутри CWD» (см. 3.4).
   - Резолв `api-key` в model-файлах: `cwd` прокидывается в `load_agent`,
@@ -191,10 +191,16 @@ flowchart TD
     wildcard только `*`, остальные символы — литералы.
 - `template.rs` + `settings-template.json5`
   - Убрать поле `cwd` и `vars.workspace`.
+  - Задать `vars.agent-config` по умолчанию равным
+    `harness/agents/grok-4.6.json5` (существующий файл в репозитории),
+    чтобы созданный из шаблона конфиг был валиден при CWD = корень проекта.
   - Обновить комментарии: «относительные пути вычисляются относительно CWD
     и не могут выходить за его пределы».
   - Добавить `deprecated-dir-patterns: []` с примерами `**/log`, `**/done`,
     `**/note-*`.
+  - В комментариях и тексте шаблона для `deprecated-dir-patterns`
+    использовать термин «glob pattern», а не «regex»; явно указать:
+    поддерживается только wildcard `*`, regex не поддерживается.
   - Для `tools.git.executable` зафиксировать: «path or name of the git binary;
     значение передаётся в `Command::new` и не резолвится от CWD».
 
@@ -273,6 +279,9 @@ flowchart TD
     а не полагается на process cwd.
   - `PUT /api/v1/config` берёт CWD из `state.config.cwd` и передаёт его в
     валидацию и перезагрузку.
+  - `config_default` в ветке `Missing` после записи шаблона вызывает
+    `refresh_server_config` и возвращает фактическое состояние валидации
+    (`valid`), а не константу `true`.
 
 #### `crates/agent-loop`
 
@@ -477,7 +486,9 @@ sequenceDiagram
   - `walk_folder` продолжает пропускать deprecated-узлы, в том числе по
     паттернам (через `is_deprecated`).
 - `tools/help-user.txt` — описать новый ключ, допустимый синтаксис,
-  единственный wildcard `*` и примеры.
+  единственный wildcard `*` и примеры; использовать термин
+  «glob pattern `**/<component>`» и явно указать, что regex не
+  поддерживается.
 
 ## 6. GitHub release action
 

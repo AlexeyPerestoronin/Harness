@@ -178,10 +178,14 @@
   ```txt
   invalid 'deprecated-dir-patterns' entry '**/log/**':
     unexpected '/' at position 7
-    expected pattern '**/<component>'
+    expected glob pattern '**/<component>'
     only '*' is a wildcard inside <component>; other characters are matched literally
+    regex is not supported
   ```
 - Для пустого компонента и `**` внутри компонента — свои конкретные причины.
+- Тексты ошибок, `tools/help-user.txt` и шаблон используют термин
+  «glob pattern», а не «regex»; явно указывается, что regex не
+  поддерживается.
 - Это позволяет пользователю сразу понять, где именно ошибка и как её
   исправить.
 
