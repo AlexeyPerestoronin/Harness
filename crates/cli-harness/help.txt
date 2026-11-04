@@ -50,15 +50,16 @@ FLAGS:
     --conf <path>
         Path to harness.json5. Optional. Default: <process-cwd>/harness.json5
         for console sessions and <cwd>/harness.json5 for the server.
+        The file must be inside the final cwd.
         Inside it, agent.config may be an agent file or a folder
         of agent files (you will be asked to choose).
         Cannot be combined with --conf-new or --dump.
 
     --cwd <path>
-        Workspace root override. Overrides 'cwd' from harness.json5 (or dump).
-        A relative path is resolved against the directory of the working conf file:
-        parent(--conf) for a new session/server, the directory of the dump settings for --dump.
-        The final value is absolute and normalized.
+        Workspace root. If omitted, the process current directory is used.
+        A relative path is resolved against the process current directory.
+        The final value is absolute and normalized. harness.json5 no longer
+        contains a 'cwd' key; use this flag or start from the target directory.
 
     --prompt "<user prompt>"
         Start a new console session with this user prompt.

@@ -28,10 +28,10 @@ use super::state::ServerState;
 pub async fn get_config(
     State(state): State<Arc<ServerState>>,
 ) -> Result<Json<ConfigResponse>, ApiError> {
-    let path = state.config.read().await.path.clone();
+    let (path, cwd) = state_cwd_and_path(&state).await;
     let path_text = path.to_string_lossy().into_owned();
 
-    match conf::load_server_config(&path) {
+    match conf::load_server_config(&path, &cwd) {
         Ok(ServerConfigState::Ok(settings)) => {
             let text = serde_json::to_string_pretty(&secret::redact(&settings.source))
                 .map_err(|error| internal("cannot serialize config", error))?;
@@ -68,20 +68,15 @@ pub async fn put_config(
 ) -> Result<Response, ApiError> {
     state.touch_live_deadline().await;
 
-    let (path, conf_dir) = {
-        let config = state.config.read().await;
-        let path = config.path.clone();
-        let conf_dir = config_path_parent(&path);
-        (path, conf_dir)
-    };
+    let (path, cwd) = state_cwd_and_path(&state).await;
 
-    let mut parsed = match validate_config_text(&request.text, &conf_dir, &path) {
+    let mut parsed = match validate_config_text(&request.text, &cwd, &path) {
         Ok(settings) => settings.source,
         Err(message) => return Ok(config_invalid(message)),
     };
 
     let text_to_save = if secret::has_redacted_secret(&parsed) {
-        let existing = read_existing_parsed(&path);
+        let existing = read_existing_parsed(&path, &cwd);
         let Some(existing) = existing else {
             return Ok(config_invalid(
                 "redacted secret value cannot be used for a new config".to_string(),
@@ -92,7 +87,7 @@ pub async fn put_config(
         }
         let canonical = serde_json::to_string_pretty(&parsed)
             .map_err(|error| internal("cannot serialize config", error))?;
-        if let Err(message) = validate_config_text(&canonical, &conf_dir, &path) {
+        if let Err(message) = validate_config_text(&canonical, &cwd, &path) {
             return Ok(config_invalid(message));
         }
         canonical
@@ -124,7 +119,7 @@ pub async fn config_default(
 ) -> Result<Json<ConfigDefaultResponse>, ApiError> {
     state.touch_live_deadline().await;
 
-    let path = state.config.read().await.path.clone();
+    let (path, cwd) = state_cwd_and_path(&state).await;
     let path_text = path.to_string_lossy().into_owned();
 
     if !path.exists() {
@@ -138,7 +133,7 @@ pub async fn config_default(
         }));
     }
 
-    match conf::load_server_config(&path) {
+    match conf::load_server_config(&path, &cwd) {
         Ok(ServerConfigState::Ok(settings)) => {
             let text = serde_json::to_string_pretty(&secret::redact(&settings.source))
                 .map_err(|error| internal("cannot serialize config", error))?;
@@ -169,8 +164,8 @@ pub async fn config_default(
     }
 }
 
-fn read_existing_parsed(path: &Path) -> Option<Value> {
-    match conf::load_server_config(path) {
+fn read_existing_parsed(path: &Path, cwd: &Path) -> Option<Value> {
+    match conf::load_server_config(path, cwd) {
         Ok(ServerConfigState::Ok(settings)) => return Some(settings.source),
         Ok(ServerConfigState::Invalid { .. }) | Ok(ServerConfigState::Missing) => {}
         Err(_) => {}
@@ -182,11 +177,12 @@ fn read_existing_parsed(path: &Path) -> Option<Value> {
 
 fn validate_config_text(
     text: &str,
-    conf_dir: &Path,
+    cwd: &Path,
     target_path: &Path,
 ) -> Result<ServerSettings, String> {
+    let conf_dir = config_path_parent(target_path);
     if !conf_dir.as_os_str().is_empty() {
-        std::fs::create_dir_all(conf_dir)
+        std::fs::create_dir_all(&conf_dir)
             .map_err(|error| format!("cannot create config directory: {error}"))?;
     }
     let unique = SystemTime::now()
@@ -204,7 +200,7 @@ fn validate_config_text(
     std::fs::write(&temp_path, text)
         .map_err(|error| format!("cannot write validation config: {error}"))?;
 
-    let result = match conf::load_server_config(&temp_path) {
+    let result = match conf::load_server_config(&temp_path, cwd) {
         Ok(ServerConfigState::Ok(settings)) => Ok(settings),
         Ok(ServerConfigState::Invalid { message }) => Err(message),
         Ok(ServerConfigState::Missing) => Err("config file is missing".to_string()),
@@ -237,8 +233,9 @@ fn write_config_file(path: &Path, text: &str) -> Result<(), ApiError> {
 }
 
 async fn reload_server_config(state: &Arc<ServerState>, path: &Path) -> Result<(), ApiError> {
-    let loaded =
-        conf::load_server_config(path).map_err(|error| internal("cannot reload config", error))?;
+    let cwd = state.config.read().await.cwd.clone();
+    let loaded = conf::load_server_config(path, &cwd)
+        .map_err(|error| internal("cannot reload config", error))?;
     let mut config = state.config.write().await;
     match loaded {
         ServerConfigState::Ok(settings) => {
@@ -261,7 +258,8 @@ async fn reload_server_config(state: &Arc<ServerState>, path: &Path) -> Result<(
 }
 
 async fn refresh_server_config(state: &Arc<ServerState>, path: &Path) {
-    let loaded = match conf::load_server_config(path) {
+    let cwd = state.config.read().await.cwd.clone();
+    let loaded = match conf::load_server_config(path, &cwd) {
         Ok(loaded) => loaded,
         Err(error) => {
             eprintln!(
@@ -297,6 +295,11 @@ async fn refresh_server_config(state: &Arc<ServerState>, path: &Path) {
     }
 }
 
+async fn state_cwd_and_path(state: &Arc<ServerState>) -> (PathBuf, PathBuf) {
+    let config = state.config.read().await;
+    (config.path.clone(), config.cwd.clone())
+}
+
 fn config_path_parent(path: &Path) -> PathBuf {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -325,4 +328,3 @@ fn internal(message: impl Into<String>, error: impl std::fmt::Display) -> ApiErr
         format!("{}: {error}", message.into()),
     )
 }
-

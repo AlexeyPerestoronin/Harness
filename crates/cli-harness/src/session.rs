@@ -173,19 +173,17 @@ pub(crate) fn resolve_api_key_override(cwd: &Path, raw: &str) -> Result<String, 
     }
 }
 
-/// Resolve a `--cwd` override against the directory of the loaded conf file.
-pub(crate) fn resolve_cwd_override(raw: &Path, conf_dir: &Path) -> Result<PathBuf, String> {
-    let base = if conf_dir.is_absolute() {
-        conf_dir.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| e.to_string())?
-            .join(conf_dir)
-    };
-    let absolute = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        base.join(raw)
+/// Resolve the effective CWD for a run.
+///
+/// `--cwd` is resolved against the process current directory; without
+/// `--cwd` the process current directory is used. The result is absolute and
+/// lexically normalized.
+pub(crate) fn resolve_cwd(raw: Option<&Path>) -> Result<PathBuf, String> {
+    let current = std::env::current_dir().map_err(|e| e.to_string())?;
+    let absolute = match raw {
+        Some(raw) if raw.is_absolute() => raw.to_path_buf(),
+        Some(raw) => current.join(raw),
+        None => current,
     };
     normalize_abs(&absolute).map_err(|message| message.replace("path must be", "'cwd' must be"))
 }

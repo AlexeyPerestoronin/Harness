@@ -57,3 +57,47 @@
 
 - `cargo test -p conf` — 13 тестов проходят.
 - `cargo build -p conf` — собирается без ошибок и предупреждений.
+
+---
+
+# Исправление ошибок компиляции после CWD-first refactoring
+
+## Было
+
+Крейт `conf` был переведён на CWD-first API, но вызывающий код `cli-harness` остался на старых сигнатурах, из-за чего workspace не собирался:
+
+- `conf::load_server_config(&path)` — не хватало аргумента `cwd`;
+- `conf::load_from_value(settings_value, &conf_dir, cwd, |_| ...)` — старый набор аргументов;
+- `--cwd` по-прежнему применялся после загрузки конфига и резолвился относительно `conf_dir`, что противоречило модели CWD first.
+
+## Стало
+
+Обновлены call-sites `cli-harness`:
+
+- `main.rs`:
+  - `start_new_session` перед чтением конфига вычисляет эффективный `cwd` через `session::resolve_cwd` и передаёт его в `conf::load_server_config`;
+  - убран пост-загрузочный `settings.cwd = ...`;
+  - `start_resume_session` передаёт в `conf::load_from_value` эффективный `cwd`, а не `conf_dir`.
+- `server/mod.rs`:
+  - `serve` вычисляет эффективный `cwd` до загрузки конфига и передаёт его в `conf::load_server_config`;
+  - убрано пост-загрузочное переопределение `settings.cwd`;
+  - `LoadedServerConfig` получил поле `cwd`.
+- `server/config.rs`:
+  - все вызовы `load_server_config` получают `cwd` из `LoadedServerConfig`;
+  - `validate_config_text` принимает `cwd`, а временный файл по-прежнему создаётся рядом с целевым конфигом.
+- `server/state.rs`:
+  - в `LoadedServerConfig` добавлено поле `cwd`.
+- `session.rs`:
+  - `resolve_cwd_override(raw, conf_dir)` заменён на `resolve_cwd(raw)` — `--cwd` резолвится относительно process cwd; при отсутствии `--cwd` берётся process cwd.
+- `cli.rs` и `help.txt`:
+  - обновлены комментарии и справка: `--cwd` — это workspace root, резолвится от process cwd; `harness.json5` больше не содержит ключ `cwd`; `--conf` обязан находиться внутри итогового cwd.
+
+## Почему
+
+CWD-first модель требует, чтобы вызывающий код определял рабочую директорию до загрузки конфига и передавал её явно. Конфиг больше не может ни задавать `cwd`, ни влиять на его резолв. После изменения публичного API `conf` необходимо было привести единственного потребителя — `cli-harness` — к новым сигнатурам и новой семантике `--cwd`.
+
+## Проверка
+
+- `cargo check --workspace` — без ошибок и warning-гов.
+- `cargo test -p conf` — 13 тестов проходят.
+- `cargo test -p cli-harness` — 0 тестов, компилируется и выполняется.

@@ -89,8 +89,9 @@ async fn start_new_session(
     cwd: Option<PathBuf>,
     api_key: Option<String>,
 ) -> Result<(), String> {
-    let state = conf::load_server_config(&conf_path).map_err(|e| e.to_string())?;
-    let mut settings = match state {
+    let cwd = session::resolve_cwd(cwd.as_deref())?;
+    let state = conf::load_server_config(&conf_path, &cwd).map_err(|e| e.to_string())?;
+    let settings = match state {
         ServerConfigState::Ok(settings) => settings,
         ServerConfigState::Missing => {
             return Err(format!(
@@ -105,10 +106,6 @@ async fn start_new_session(
             ))
         }
     };
-
-    if let Some(raw) = cwd {
-        settings.cwd = session::resolve_cwd_override(&raw, &settings.conf_dir)?;
-    }
 
     let pre_session = pre_session_interaction();
     let api_key_override = match api_key {
@@ -157,9 +154,9 @@ async fn start_resume_session(
     cwd: Option<PathBuf>,
     api_key: Option<String>,
 ) -> Result<(), String> {
+    let cwd = session::resolve_cwd(cwd.as_deref())?;
     let settings_value = agent_loop::dump_settings::extract(&dump_path)?;
-    let conf_dir = agent_loop::dump_settings::conf_dir_of(&settings_value)?;
-    let mut settings = conf::load_from_value(settings_value, &conf_dir, cwd, |_| {
+    let mut settings = conf::load_from_value(settings_value, &cwd, |_| {
         Err("agent was not selected".to_string())
     })
     .map_err(|e| e.to_string())?;

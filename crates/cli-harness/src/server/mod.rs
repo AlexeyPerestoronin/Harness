@@ -48,8 +48,9 @@ pub struct ServeOptions {
 /// Start the HTTPS server and block until it stops.
 pub async fn serve(options: ServeOptions) -> Result<(), String> {
     let conf_path = resolve_conf_path(&options.conf)?;
-    let loaded = conf::load_server_config(&conf_path).map_err(|e| e.to_string())?;
-    let (config_state, mut settings, mut server) = match loaded {
+    let cwd = session::resolve_cwd(options.cwd.as_deref())?;
+    let loaded = conf::load_server_config(&conf_path, &cwd).map_err(|e| e.to_string())?;
+    let (config_state, settings, mut server) = match loaded {
         ServerConfigState::Ok(settings) => {
             let server = settings.server.clone();
             (ConfigState::Ok, Some(settings), server)
@@ -63,22 +64,6 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
             (ConfigState::Invalid, None, conf::ServerConfig::default())
         }
     };
-
-    if let Some(raw) = options.cwd {
-        let conf_dir = settings
-            .as_ref()
-            .map(|s| s.conf_dir.clone())
-            .unwrap_or_else(|| {
-                conf_path
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| PathBuf::from("."))
-            });
-        let cwd = session::resolve_cwd_override(&raw, &conf_dir)?;
-        if let Some(settings) = settings.as_mut() {
-            settings.cwd = cwd;
-        }
-    }
 
     if let Some(host) = options.host {
         server.host = host;
@@ -104,6 +89,7 @@ pub async fn serve(options: ServeOptions) -> Result<(), String> {
     let state = Arc::new(ServerState {
         config: RwLock::new(LoadedServerConfig {
             path: conf_path,
+            cwd: cwd.clone(),
             config_state,
             settings,
             server: server.clone(),

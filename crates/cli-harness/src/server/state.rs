@@ -41,6 +41,8 @@ impl ServerState {
 pub struct LoadedServerConfig {
     /// Absolute path of `harness.json5` used by the server.
     pub path: PathBuf,
+    /// Effective CWD the server was started with (and validates configs against).
+    pub cwd: PathBuf,
     /// Coarse configuration state: `ok` | `missing` | `invalid`.
     pub config_state: ConfigState,
     /// Fully validated server settings when `config_state` is `ok`.

@@ -29,7 +29,7 @@ pub enum CliAction {
     Serve {
         /// Path to `harness.json5`. Defaults to `<cwd>/harness.json5`.
         conf: PathBuf,
-        /// Workspace override. Resolved against the working conf file directory.
+        /// Workspace root. Resolved against the process current directory.
         cwd: Option<PathBuf>,
         /// CLI port override.
         port: Option<u16>,
@@ -54,7 +54,7 @@ pub enum CliAction {
         prompt_file: Option<PathBuf>,
         /// Dump file to resume from.
         dump: Option<PathBuf>,
-        /// Workspace override. Resolved against the working conf file directory.
+        /// Workspace root. Resolved against the process current directory.
         cwd: Option<PathBuf>,
         /// API-key override: a literal key or a path to a UTF-8 key file.
         api_key: Option<String>,
