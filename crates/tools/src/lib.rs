@@ -361,6 +361,7 @@ mod tests {
         assert!(arg_i64(&args(json!(1.5)), "v", -1).is_err());
         assert!(arg_i64(&args(json!("1.5")), "v", -1).is_err());
         assert!(arg_i64(&args(json!("999999999999999999999999")), "v", -1).is_err());
+        assert!(arg_i64(&args(serde_json::from_str::<Value>("9223372036854775808").unwrap()), "v", -1).is_err());
     }
 
     #[test]
