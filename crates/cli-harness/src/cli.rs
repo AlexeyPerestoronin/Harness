@@ -3,7 +3,7 @@
 //! Parsing is explicit (no clap) so `--help` is the compile-time `help.txt`,
 //! `--help-tools` is `tools::HELP_USER`, `--version` is `CARGO_PKG_VERSION`,
 //! and the xor rules for `--prompt` / `--prompt-file` / `--dump` / `--conf-new`
-//! are checked in one place. `--conf` defaults to `<process-cwd>/harness.json5`
+//! are checked in one place. `--conf` defaults to `<cwd>/harness.json5`
 //! for a new session and cannot be combined with `--dump`.
 
 use std::path::{Path, PathBuf};
@@ -233,7 +233,7 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
         let conf = if let Some(conf) = conf {
             conf
         } else {
-            default_conf_path_for_serve(cwd.as_deref())
+            default_conf_path(cwd.as_deref())
         };
         return Ok(CliAction::Serve {
             conf,
@@ -270,6 +270,9 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 .to_string(),
         );
     }
+    if dump.is_some() && cwd.is_some() {
+        return Err("--cwd cannot be used with --dump (CWD is taken from the dump file)".to_string());
+    }
 
     if let Some(path) = conf_new {
         return Ok(CliAction::ConfNew { path });
@@ -278,7 +281,7 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let conf = if dump.is_some() {
         None
     } else {
-        Some(conf.unwrap_or_else(default_conf_path))
+        Some(conf.unwrap_or_else(|| default_conf_path(cwd.as_deref())))
     };
     Ok(CliAction::Start {
         conf,
@@ -318,17 +321,10 @@ pub fn read_prompt_file(path: &Path) -> Result<String, String> {
     Ok(text)
 }
 
-/// Default conf path: `<process-cwd>/harness.json5`.
-pub fn default_conf_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("harness.json5")
-}
-
-/// Default conf path for the server mode: `<cwd>/harness.json5`.
+/// Default conf path: `<cwd>/harness.json5`.
 ///
-/// When `--cwd` is not supplied the process current directory is used.
-pub fn default_conf_path_for_serve(cwd: Option<&Path>) -> PathBuf {
+/// When `cwd` is not supplied the process current directory is used.
+pub fn default_conf_path(cwd: Option<&Path>) -> PathBuf {
     let base = cwd
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -358,3 +354,46 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<Option<Strin
     Ok(None)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn default_conf_path_uses_supplied_cwd() {
+        assert_eq!(
+            default_conf_path(Some(Path::new("C:/work"))),
+            PathBuf::from("C:/work").join("harness.json5")
+        );
+    }
+
+    #[test]
+    fn default_conf_path_uses_process_cwd_when_no_cwd() {
+        let expected = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("harness.json5");
+        assert_eq!(default_conf_path(None), expected);
+    }
+
+    #[test]
+    fn parse_args_rejects_cwd_with_dump() {
+        let argv = args(&["--cwd", "C:/work", "--dump", "dump.json5"]);
+        let error = parse_args(&argv).unwrap_err();
+        assert!(error.contains("--cwd cannot be used with --dump"));
+    }
+
+    #[test]
+    fn parse_args_defaults_conf_from_cwd_for_start() {
+        let argv = args(&["--cwd", "C:/work", "--prompt", "hello"]);
+        match parse_args(&argv).unwrap() {
+            CliAction::Start { conf, cwd, .. } => {
+                assert_eq!(conf, Some(PathBuf::from("C:/work").join("harness.json5")));
+                assert_eq!(cwd, Some(PathBuf::from("C:/work")));
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+}

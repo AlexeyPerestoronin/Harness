@@ -188,6 +188,22 @@ pub(crate) fn resolve_cwd(raw: Option<&Path>) -> Result<PathBuf, String> {
     normalize_abs(&absolute).map_err(|message| message.replace("path must be", "'cwd' must be"))
 }
 
+/// Resolve a CLI `--conf` / `--dump` path for opening and display.
+///
+/// Relative paths are resolved against the **process** current directory;
+/// absolute paths are kept as-is. The result is absolute and lexically
+/// normalized.
+pub(crate) fn resolve_abs_path(raw: &Path) -> Result<PathBuf, String> {
+    let absolute = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(raw)
+    };
+    normalize_abs(&absolute)
+}
+
 /// Normalize an absolute path: resolve `.` / `..` lexically and require a
 /// non-empty result.
 pub(crate) fn normalize_abs(path: &Path) -> Result<PathBuf, String> {
@@ -213,3 +229,49 @@ pub(crate) fn normalize_abs(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_cwd_uses_process_cwd_for_none_and_relative_paths() {
+        let current = std::env::current_dir().unwrap();
+        assert_eq!(resolve_cwd(None).unwrap(), normalize_abs(&current).unwrap());
+
+        let relative = Path::new("relative-cwd");
+        assert_eq!(
+            resolve_cwd(Some(relative)).unwrap(),
+            normalize_abs(&current.join(relative)).unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_cwd_normalizes_absolute_paths() {
+        let current = std::env::current_dir().unwrap();
+        let absolute = current.join("a").join("..").join("b");
+        assert_eq!(
+            resolve_cwd(Some(&absolute)).unwrap(),
+            normalize_abs(&absolute).unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_abs_path_resolves_relative_paths_from_process_cwd() {
+        let current = std::env::current_dir().unwrap();
+        let raw = Path::new("conf.json5");
+        assert_eq!(
+            resolve_abs_path(raw).unwrap(),
+            normalize_abs(&current.join(raw)).unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_abs_path_normalizes_absolute_paths() {
+        let current = std::env::current_dir().unwrap();
+        let raw = current.join("x").join("..").join("conf.json5");
+        assert_eq!(
+            resolve_abs_path(&raw).unwrap(),
+            normalize_abs(&raw).unwrap()
+        );
+    }
+}

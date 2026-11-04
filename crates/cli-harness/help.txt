@@ -8,7 +8,7 @@ USAGE:
                 [--tls-cert <path> --tls-key <path>] [--auth-token <token>]
     harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt "<user prompt>"
     harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt-file <path to prompt file>
-    harness.exe [--cwd <path>] [--api-key <key>] --dump "<path to dump file>"
+    harness.exe [--api-key <key>] --dump "<path to dump file>"
     harness.exe --conf-new "<path to new conf file>"
 
 DESCRIPTION:
@@ -48,9 +48,11 @@ FLAGS:
         token is generated and printed to stdout. Only valid with --serve.
 
     --conf <path>
-        Path to harness.json5. Optional. Default: <process-cwd>/harness.json5
-        for console sessions and <cwd>/harness.json5 for the server.
-        The file must be inside the final cwd.
+        Path to harness.json5. Optional. Default: <cwd>/harness.json5 in
+        both console and server modes.
+        A relative path is resolved against the process current directory,
+        then normalized. After normalization the file must be inside the
+        final cwd.
         Inside it, agent.config may be an agent file or a folder
         of agent files (you will be asked to choose).
         Cannot be combined with --conf-new or --dump.
@@ -60,6 +62,7 @@ FLAGS:
         A relative path is resolved against the process current directory.
         The final value is absolute and normalized. harness.json5 no longer
         contains a 'cwd' key; use this flag or start from the target directory.
+        Cannot be combined with --dump.
 
     --prompt "<user prompt>"
         Start a new console session with this user prompt.
@@ -70,8 +73,10 @@ FLAGS:
     --dump "<path to dump file>"
         Continue a console session from a dump file. The prompt is taken from dump
         history; --prompt is not used.
+        A relative path is resolved against the process current directory.
         Configuration is taken from the dump file; --conf cannot be used
-        with --dump.
+        with --dump. CWD is taken from the top-level "CWD" value in the dump;
+        --cwd is not required and cannot be combined with --dump.
 
     --api-key <key>
         API-key override for a console session. A literal key or a path to a
@@ -91,6 +96,7 @@ RULES:
     One of --prompt, --prompt-file, --dump, --conf-new or --serve is required
     (no arguments also starts the server).
     --conf cannot be used with --dump (configuration is taken from the dump file).
+    --cwd cannot be used with --dump (CWD is taken from the dump file).
     --port, --host, --tls-cert, --tls-key and --auth-token are only valid with --serve.
 
 EXAMPLES:

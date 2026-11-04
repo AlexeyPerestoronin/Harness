@@ -53,6 +53,7 @@ pub trait RunObserver: Send + Sync {
 
 /// Drive one harness session.
 pub struct AgentLoop {
+    cwd: PathBuf,
     safe_mode: bool,
     interaction: Arc<dyn Interaction>,
     iteration: i64,
@@ -78,7 +79,7 @@ impl AgentLoop {
         let registry = Arc::new(ToolRegistry::build(
             &tools,
             ToolsContext {
-                cwd,
+                cwd: cwd.clone(),
                 temp_dir: session_dir,
                 interaction: interaction.clone(),
             },
@@ -105,6 +106,7 @@ impl AgentLoop {
             )?),
         };
         Ok(Self {
+            cwd,
             safe_mode: agent.mode.is_safe(),
             interaction,
             iteration: 0,
@@ -227,7 +229,8 @@ impl AgentLoop {
             if let Err(e) = self.agent.dump_session(dump_file) {
                 return Ok(self.failed(e));
             }
-            if let Err(e) = crate::dump_settings::embed(dump_file, &self.dump_settings) {
+            if let Err(e) = crate::dump_settings::embed(dump_file, &self.dump_settings, &self.cwd)
+            {
                 return Ok(self.failed(e));
             }
             if stop {

@@ -75,7 +75,7 @@ async fn run() -> Result<(), String> {
                 None => prompt,
             };
             match (dump, conf) {
-                (Some(dump_path), _) => start_resume_session(dump_path, cwd, api_key).await,
+                (Some(dump_path), _) => start_resume_session(dump_path, api_key).await,
                 (None, Some(conf_path)) => start_new_session(conf_path, prompt, cwd, api_key).await,
                 (None, None) => Err("missing --conf".to_string()),
             }
@@ -86,10 +86,13 @@ async fn run() -> Result<(), String> {
 async fn start_new_session(
     conf_path: PathBuf,
     prompt: Option<String>,
-    cwd: Option<PathBuf>,
+    cwd_override: Option<PathBuf>,
     api_key: Option<String>,
 ) -> Result<(), String> {
-    let cwd = session::resolve_cwd(cwd.as_deref())?;
+    let cwd = session::resolve_cwd(cwd_override.as_deref())?;
+    let conf_path = session::resolve_abs_path(&conf_path)?;
+    println!("cwd: {}", cwd.display());
+    println!("conf: {}", conf_path.display());
     let state = conf::load_server_config(&conf_path, &cwd).map_err(|e| e.to_string())?;
     let settings = match state {
         ServerConfigState::Ok(settings) => settings,
@@ -151,11 +154,22 @@ async fn start_new_session(
 
 async fn start_resume_session(
     dump_path: PathBuf,
-    cwd: Option<PathBuf>,
     api_key: Option<String>,
 ) -> Result<(), String> {
-    let cwd = session::resolve_cwd(cwd.as_deref())?;
-    let settings_value = agent_loop::dump_settings::extract(&dump_path)?;
+    let dump_path = session::resolve_abs_path(&dump_path)?;
+    let (settings_value, cwd) = agent_loop::dump_settings::extract(&dump_path)?;
+    println!("cwd: {}", cwd.display());
+    println!("settings: from dump");
+
+    std::fs::metadata(&cwd)
+        .map_err(|e| format!("cannot access cwd '{}' from dump: {e}", cwd.display()))?;
+    if !cwd.is_dir() {
+        return Err(format!(
+            "cwd '{}' from dump is not a directory",
+            cwd.display()
+        ));
+    }
+
     let mut settings = conf::load_from_value(settings_value, &cwd, |_| {
         Err("agent was not selected".to_string())
     })

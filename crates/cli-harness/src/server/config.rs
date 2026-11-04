@@ -96,7 +96,7 @@ pub async fn put_config(
     };
 
     write_config_file(&path, &text_to_save)?;
-    reload_server_config(&state, &path).await?;
+    reload_server_config(&state, &path, &cwd).await?;
 
     Ok((
         StatusCode::OK,
@@ -124,12 +124,13 @@ pub async fn config_default(
 
     if !path.exists() {
         write_config_file(&path, &conf::template_text())?;
-        refresh_server_config(&state, &path).await;
+        refresh_server_config(&state, &path, &cwd).await;
+        let valid = state.config.read().await.config_state == ConfigState::Ok;
         return Ok(Json(ConfigDefaultResponse {
             path: path_text,
             exists: true,
             text: conf::template_text(),
-            valid: true,
+            valid,
         }));
     }
 
@@ -152,12 +153,13 @@ pub async fn config_default(
         })),
         Ok(ServerConfigState::Missing) => {
             write_config_file(&path, &conf::template_text())?;
-            refresh_server_config(&state, &path).await;
+            refresh_server_config(&state, &path, &cwd).await;
+            let valid = state.config.read().await.config_state == ConfigState::Ok;
             Ok(Json(ConfigDefaultResponse {
                 path: path_text,
                 exists: true,
                 text: conf::template_text(),
-                valid: true,
+                valid,
             }))
         }
         Err(error) => Err(internal("cannot read config", error)),
@@ -232,9 +234,12 @@ fn write_config_file(path: &Path, text: &str) -> Result<(), ApiError> {
     })
 }
 
-async fn reload_server_config(state: &Arc<ServerState>, path: &Path) -> Result<(), ApiError> {
-    let cwd = state.config.read().await.cwd.clone();
-    let loaded = conf::load_server_config(path, &cwd)
+async fn reload_server_config(
+    state: &Arc<ServerState>,
+    path: &Path,
+    cwd: &Path,
+) -> Result<(), ApiError> {
+    let loaded = conf::load_server_config(path, cwd)
         .map_err(|error| internal("cannot reload config", error))?;
     let mut config = state.config.write().await;
     match loaded {
@@ -257,9 +262,8 @@ async fn reload_server_config(state: &Arc<ServerState>, path: &Path) -> Result<(
     }
 }
 
-async fn refresh_server_config(state: &Arc<ServerState>, path: &Path) {
-    let cwd = state.config.read().await.cwd.clone();
-    let loaded = match conf::load_server_config(path, &cwd) {
+async fn refresh_server_config(state: &Arc<ServerState>, path: &Path, cwd: &Path) {
+    let loaded = match conf::load_server_config(path, cwd) {
         Ok(loaded) => loaded,
         Err(error) => {
             eprintln!(

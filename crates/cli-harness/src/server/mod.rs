@@ -15,7 +15,7 @@ pub mod tls;
 pub mod web_interaction;
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -47,8 +47,8 @@ pub struct ServeOptions {
 
 /// Start the HTTPS server and block until it stops.
 pub async fn serve(options: ServeOptions) -> Result<(), String> {
-    let conf_path = resolve_conf_path(&options.conf)?;
     let cwd = session::resolve_cwd(options.cwd.as_deref())?;
+    let conf_path = session::resolve_abs_path(&options.conf)?;
     let loaded = conf::load_server_config(&conf_path, &cwd).map_err(|e| e.to_string())?;
     let (config_state, settings, mut server) = match loaded {
         ServerConfigState::Ok(settings) => {
@@ -139,9 +139,7 @@ async fn print_startup_info(
     let config = state.config.read().await;
     println!("{} (server mode)", crate::cli::version_line());
     println!("conf: {}", config.path.display());
-    if let Some(settings) = &config.settings {
-        println!("cwd: {}", settings.cwd.display());
-    }
+    println!("cwd: {}", config.cwd.display());
     println!("host: {}", server.host);
     println!("port: {}", server.port);
     match (&server.tls_cert, &server.tls_key) {
@@ -223,15 +221,3 @@ async fn live_timeout_task(state: Arc<ServerState>) {
         }
     }
 }
-
-fn resolve_conf_path(raw: &Path) -> Result<PathBuf, String> {
-    let absolute = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| e.to_string())?
-            .join(raw)
-    };
-    session::normalize_abs(&absolute)
-}
-
