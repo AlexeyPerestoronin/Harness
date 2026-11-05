@@ -118,7 +118,7 @@ impl TerminalModule {
         let in_list = self
             .cwd_list
             .iter()
-            .any(|entry| requested.starts_with(&resolve_from(&root, entry)));
+            .any(|entry| requested.starts_with(resolve_from(&root, entry)));
         if !in_list {
             return Err(denied("it is outside every cwd-list entry"));
         }

@@ -216,8 +216,7 @@ impl ToolRegistry {
             let module = module.clone();
             tokio::task::spawn_blocking(move || module.call_sync(&name_owned, &map))
                 .await
-                .map_err(|e| format!("tool '{name}' execution failed: {e}"))?
-                .map_err(|e| e)?
+                .map_err(|e| format!("tool '{name}' execution failed: {e}"))??
         };
         self.log_result(&result).await;
         Ok(result.output)
@@ -278,7 +277,7 @@ pub fn arg_str(args: &Map<String, Value>, key: &str) -> Result<String, String> {
     match args.get(key) {
         Some(Value::String(s)) => Ok(s.clone()),
         Some(Value::Number(n)) => Ok(n.to_string()),
-        Some(Value::Bool(b)) => Ok(b.to_string()),
+        Some(Value::Bool(_)) => Err(format!("argument '{key}' must be a string, got boolean")),
         Some(_) => Err(format!("argument '{key}' must be a string")),
         None => Err(format!("missing argument '{key}'")),
     }
@@ -330,13 +329,34 @@ fn read_conf_owned_file(path: &Path, action: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{arg_i64, validate_output_buff_size};
+    use super::{arg_i64, arg_str, validate_output_buff_size};
     use serde_json::{json, Map, Value};
 
     fn args(value: Value) -> Map<String, Value> {
         let mut map = Map::new();
         map.insert("v".to_string(), value);
         map
+    }
+
+    #[test]
+    fn arg_str_accepts_string_and_json_number() {
+        assert_eq!(arg_str(&args(json!("path")), "v"), Ok("path".to_string()));
+        assert_eq!(arg_str(&args(json!(42)), "v"), Ok("42".to_string()));
+    }
+
+    #[test]
+    fn arg_str_rejects_bool() {
+        assert!(arg_str(&args(json!(true)), "v").is_err());
+        assert!(arg_str(&args(json!(false)), "v").is_err());
+    }
+
+    #[test]
+    fn arg_str_rejects_object_array_null_and_reports_missing() {
+        assert!(arg_str(&args(json!({})), "v").is_err());
+        assert!(arg_str(&args(json!([])), "v").is_err());
+        assert!(arg_str(&args(Value::Null), "v").is_err());
+        let err = arg_str(&Map::new(), "v").unwrap_err();
+        assert!(err.contains("missing argument 'v'"), "{err}");
     }
 
     #[test]

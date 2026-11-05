@@ -39,7 +39,10 @@
                 "."
             ],
             "available-commands": [
-                "git",
+                "git diff",
+                "git status",
+                "git add",
+                "git commit",
                 "cargo"
             ],
             "command-execution-limit": 300
