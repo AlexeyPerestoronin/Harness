@@ -1,8 +1,8 @@
 {
     // Agent-loop config for task execution.
-    "cwd": "C:/MyLife/Harness",
+    
     "agent": {
-        "config": "C:/MyLife/Harness/harness/agents/grok-4.6.json5",
+        "config": "harness/agents",
         "mode": "auto-accept",
         "token-limit": 256000,
         "iteration-limit": 40,
@@ -12,20 +12,23 @@
     "tools": {
         "fs": {
             "available-dirs": [
-                "r:C:/MyLife/Harness/.github/workflows",
-                "r:C:/MyLife/Harness/WiKi/todo/phase-7"
+                "r:.github/workflows",
+                "w:WiKi/todo/phase-7/pm-consulting report 3"
             ],
             "available-file-extensions": [],
             "available-files": [
-                "w:C:/MyLife/Harness/.github/workflows/ci.yml",
-                "r:C:/MyLife/Harness/Cargo.toml"
+                "w:.github/workflows/ci.yml",
+                "r:Cargo.toml"
             ],
             "deprecated-dirs": [
-                "C:/MyLife/Harness/.git",
-                "C:/MyLife/Harness/.log",
-                "C:/MyLife/Harness/target",
-                "C:/MyLife/Harness/crates/web-harness/target",
-                "C:/MyLife/Harness/WiKi/done"
+                ".git",
+                ".log",
+                "target",
+                "crates/web-harness/target",
+                "WiKi/done"
+            ],
+            "deprecated-dir-patterns": [
+                "**/done"
             ],
             "deprecated-files": []
         },
@@ -47,17 +50,17 @@
         "roles": {
             "senior-developer": {
                 "description": "Применяется при разработке кода",
-                "file": "C:/MyLife/Harness/harness/roles/senior-developer.md"
+                "file": "harness/roles/senior-developer.md"
             }
         },
         "skills": {
             "rust-programming": {
                 "description": "Написание кода на Rust",
-                "file": "C:/MyLife/Harness/harness/skills/rust-programming.md"
+                "file": "harness/skills/rust-programming.md"
             },
             "bugfixing": {
                 "description": "Исправление багов и отладка",
-                "file": "C:/MyLife/Harness/harness/skills/bugfixing.md"
+                "file": "harness/skills/bugfixing.md"
             }
         }
     }
