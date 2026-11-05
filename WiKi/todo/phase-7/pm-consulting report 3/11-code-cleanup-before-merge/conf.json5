@@ -1,0 +1,92 @@
+{
+    // Agent-loop config for task execution.
+
+    "agent": {
+        "config": "harness/agents",
+        "mode": "auto-accept",
+        "token-limit": 256000,
+        "iteration-limit": 40,
+        "USD-limit": 2.0,
+        "log-folder": ".log"
+    },
+    "tools": {
+        "fs": {
+            "available-dirs": [
+                "r:crates",
+                "r:.github/workflows",
+                "r:WiKi/todo/phase-7/pm-consulting report 3",
+                "w:WiKi/todo/phase-7/pm-consulting report 3/11-code-cleanup-before-merge"
+            ],
+            "available-file-extensions": [],
+            "available-files": [
+                "w:crates/conf/src/lib.rs",
+                "w:crates/conf/src/load_tests.rs",
+                "w:crates/conf/src/load.rs",
+                "w:crates/conf/src/glob.rs",
+                "w:crates/conf/src/template.rs",
+                "w:crates/conf/src/scan.rs",
+                "w:crates/conf/src/str/keys.rs",
+                "w:crates/tools/src/lib.rs",
+                "w:crates/tools/src/process.rs",
+                "w:crates/tools/src/terminal.rs",
+                "w:crates/tools/src/user.rs",
+                "w:crates/tools/src/fs/access.rs",
+                "w:crates/agent-loop/src/dump_settings.rs",
+                "w:crates/agent-loop/src/vendor_request.rs",
+                "w:crates/cli-harness/src/cli.rs",
+                "w:crates/cli-harness/src/session.rs",
+                "w:crates/cli-harness/src/server/config.rs",
+                "w:crates/harness-api/Cargo.toml",
+                "w:crates/tools/Cargo.toml",
+                "w:crates/interactions/Cargo.toml",
+                "w:.github/workflows/ci.yml",
+                "r:Cargo.toml"
+            ],
+            "deprecated-dirs": [
+                ".git",
+                ".log",
+                "target",
+                "crates/web-harness/target",
+                "WiKi/done"
+            ],
+            "deprecated-dir-patterns": [
+                "**/done"
+            ],
+            "deprecated-files": []
+        },
+        "git": {
+            "executable": "git",
+            "execution-limit": 120
+        },
+        "terminal": {
+            "cwd-list": [
+                "."
+            ],
+            "available-commands": [
+                "git diff",
+                "git status",
+                "git add",
+                "git commit",
+                "cargo"
+            ],
+            "command-execution-limit": 300
+        },
+        "user": {},
+        "roles": {
+            "senior-developer": {
+                "description": "Применяется при разработке кода",
+                "file": "harness/roles/senior-developer.md"
+            }
+        },
+        "skills": {
+            "rust-programming": {
+                "description": "Написание кода на Rust",
+                "file": "harness/skills/rust-programming.md"
+            },
+            "bugfixing": {
+                "description": "Исправление багов и отладка",
+                "file": "harness/skills/bugfixing.md"
+            }
+        }
+    }
+}
