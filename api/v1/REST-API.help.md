@@ -1,6 +1,6 @@
 # REST API Help
 
-This document is the human-readable reference for the `harness.exe --serve` HTTPS REST API. All examples use `camelCase` JSON field names and can be executed with any HTTP lient that supports HTTPS and bearer
+This document is the human-readable reference for the `harness.exe --serve` HTTPS REST API. All examples use `camelCase` JSON field names and can be executed with any HTTP client that supports HTTPS and bearer
 tokens.
 
 ---
@@ -51,7 +51,7 @@ Exception: `PUT /api/v1/config` validation failures return `400` with the body
   "ok": false,
   "error": {
     "code": "CONFIG_INVALID",
-    "message": "missing 'cwd'"
+    "message": "'cwd' is no longer set in the config; use '--cwd' or run the process from the target directory"
   }
 }
 ```
@@ -100,7 +100,7 @@ Returns server availability and state. Intentionally does not expose `cwd`,
 ```json
 {
   "status": "ok",
-  "version": "1.5.0",
+  "version": "2.1.0",
   "serverTime": "2026-01-01T12:00:00Z",
   "authRequired": true,
   "runState": "idle",
@@ -365,7 +365,7 @@ Returns the current configuration with secret redaction.
 {
   "path": "C:/MyLife/Harness/harness.json5",
   "exists": true,
-  "text": "{\n  \"cwd\": \"C:/MyLife/Harness\",\n  ...\n}\n",
+  "text": "{\n  ...\n}\n",
   "valid": true,
   "validationError": null
 }
@@ -400,7 +400,7 @@ validation succeeds.
 
 ```json
 {
-  "text": "{\n  \"cwd\": \"C:/MyLife/Harness\",\n  ...\n}\n"
+  "text": "{\n  ...\n}\n"
 }
 ```
 
@@ -421,7 +421,7 @@ validation succeeds.
   "ok": false,
   "error": {
     "code": "CONFIG_INVALID",
-    "message": "missing 'cwd'"
+    "message": "'cwd' is no longer set in the config; use '--cwd' or run the process from the target directory"
   }
 }
 ```

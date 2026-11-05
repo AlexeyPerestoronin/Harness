@@ -55,7 +55,7 @@ cargo test --workspace
 cargo build --release -p cli-harness
 ```
 
-Binary: `target/release/cli-harness` (`target/release/cli-harness.exe` on Windows). Release artifacts are published as `harness-<version>-linux`, `harness-<version>-macos` and `harness-<version>.exe`.
+Binary: `target/release/cli-harness` (`target/release/cli-harness.exe` on Windows). Release artifacts are published as `harness-<version>-linux`, `harness-<version>-macos` and `harness-<version>-windows.exe`.
 
 ## CLI
 
@@ -69,7 +69,7 @@ harness.exe [--serve] [--host <addr>] [--port <port>] [--conf <path>] [--cwd <pa
             [--tls-cert <path> --tls-key <path>] [--auth-token <token>]
 harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt "<user prompt>"
 harness.exe [--cwd <path>] [--api-key <key>] [--conf <path>] --prompt-file <path to prompt file>
-harness.exe [--cwd <path>] [--api-key <key>] --dump "<path to dump file>"
+harness.exe [--api-key <key>] --dump "<path to dump file>"
 harness.exe --conf-new "<path to new conf file>"
 ```
 
@@ -77,7 +77,7 @@ Rules:
 
 - No arguments (or `--serve`) starts the HTTPS server.
 - `--prompt`, `--prompt-file`, `--dump` and `--conf-new` are mutually exclusive. One of them is required for a console session.
-- `--conf` is optional. Default: `<process-cwd>/harness.json5` for console sessions and `<cwd>/harness.json5` for the server. Cannot be combined with `--conf-new` or `--dump`.
+- `--conf` is optional. Default: `<cwd>/harness.json5` in both console and server modes. A relative path is resolved against the process current directory, then normalized; after normalization the file must be inside the final CWD. Cannot be combined with `--conf-new` or `--dump`.
 - `--prompt` starts a new session. `--prompt-file` starts a new session with the user prompt read from a UTF-8 file. `--dump` continues from a dump file (the prompt is taken from dump history; configuration is taken from the dump, `--conf` is forbidden). `--conf-new` writes a commented JSON5 template and exits.
 - `--port`, `--host`, `--tls-cert`, `--tls-key` and `--auth-token` are valid only with `--serve`.
 
@@ -144,10 +144,10 @@ In the first version `web-harness` is not published to crates.io.
 
 ### Loop file `harness.json5`
 
-- `cwd` — agent workspace (tools and logs).
-- `agent.log-folder` — log folder relative to `cwd`.
+- CWD — agent workspace (tools and logs). It is set only through `--cwd` or, when the flag is omitted, the process current directory. A `cwd` key in `harness.json5` is rejected at load time.
+- `agent.log-folder` — log folder relative to CWD.
 - `agent`:
-  - `config` — path to a model file or a folder of model files (you will be asked to choose). Relative paths are resolved against the directory of this conf file.
+  - `config` — path to a model file or a folder of model files (you will be asked to choose). Relative paths are resolved against CWD and must stay inside CWD.
   - `mode` — `safe` (ask when a limit is exceeded) or `auto-accept` (log and continue).
   - `token-limit`, `iteration-limit`, `USD-limit` — session limits; `-1` = unlimited.
 - `server` — optional HTTPS server settings:
@@ -177,7 +177,7 @@ Known agents:
 
 A missing key in `tools` means the module is not registered. An unknown key is a load error. There are no `search` or `meta` modules.
 
-- **fs** — files and folders; `find_str` / `find_str_by_regex`; `find_file_by_str` / `find_files_by_regex`; `list_available_*` for dirs, files and extensions. Fields: `available-dirs`, `available-file-extensions`, `available-files` (`r:` / `w:` prefixes on the dir and file allow-lists), `deprecated-dirs`, `deprecated-files`.
+- **fs** — files and folders; `find_str` / `find_str_by_regex`; `find_file_by_str` / `find_files_by_regex`; `list_available_*` for dirs, files and extensions. Fields: `available-dirs`, `available-file-extensions`, `available-files` (`r:` / `w:` prefixes on the dir and file allow-lists), `deprecated-dirs`, `deprecated-files`, `deprecated-dir-patterns`.
 - **git** — `executable`, `execution-limit`.
 - **terminal** — `run_shell`; fields `cwd-list`, `available-commands`, timeout `command-execution-limit`.
 - **user** — `ask_user`, `request_read_access_for`, `request_write_access_for`, `request_command_shell_execution`.
@@ -188,6 +188,6 @@ A missing key in `tools` means the module is not registered. An unknown key is a
 GitHub Actions on push to `master` and on tags `v*` / `harness-*`:
 
 - builds and tests the workspace on `ubuntu-latest`, `windows-latest` and `macos-latest`;
-- builds `cli-harness` in release mode and uploads `harness-<version>.exe`, `harness-<version>-linux` and `harness-<version>-macos` artifacts;
+- builds `cli-harness` in release mode and uploads `harness-<version>-windows.exe`, `harness-<version>-linux` and `harness-<version>-macos` artifacts;
 - builds `web-harness` with Trunk and publishes `dist` to GitHub Pages on push to `master`;
-- creates a GitHub Release with the three native binaries when a tag is pushed.
+- creates a GitHub Release only for `v*` tags, verifies that the tag matches the version from `Cargo.toml`, and publishes `.sha256` files for the three native binaries.

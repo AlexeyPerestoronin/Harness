@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Harness Server REST API
-  version: 1.5.0
+  version: 2.1.0
   description: >-
     HTTPS REST API exposed by `harness.exe --serve`. All routes except
     `/api/v1/health` require a bearer token.
@@ -12,7 +12,7 @@ servers:
       host:
         default: 127.0.0.1
       port:
-        default: '443'
+        default: '4067'
 security:
   - bearerAuth: []
 paths:

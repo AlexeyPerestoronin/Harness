@@ -218,8 +218,8 @@ Each entry:
     Short text listed in the get_skill_explanation descriptor.
 
   file — string, required, non-empty
-    Path to the skill text file. Relative paths are resolved against the
-    directory of harness.json5. The file is checked at startup: missing
+    Path to the skill text file. Relative paths are resolved against CWD
+    and must stay inside CWD. The file is checked at startup: missing
     path or a directory fails conf load
     (`error → skill-file '<absolute path>' doesn't find`).
 
@@ -253,7 +253,7 @@ Configuration (`tools.roles`): object whose keys are role names
             "file": "harness/roles/senior-developer.md"
         },
 
-Each entry: `description` and `file`, same rules as skills. Missing file
+Each entry: `description` and `file`. Relative paths are resolved against CWD and must stay inside CWD. Missing file
 at startup: `error → role-file '<absolute path>' doesn't find`.
 
 The module does not use the fs allow-list. Files are re-read from disk
@@ -277,7 +277,6 @@ agent file and vice versa. Nested `${vars:...}` inside vars is an error.
     "work-dir": "C:/work",
     "limit": 120
   },
-  "cwd": "${vars:work-dir}",
   "tools": {
     "git": {
       "executable": "git",
@@ -285,6 +284,11 @@ agent file and vice versa. Nested `${vars:...}` inside vars is an error.
     }
   }
 
+
+CWD is not set in the configuration: the workspace CWD comes from `--cwd`
+or, when the flag is omitted, from the process current directory. A root
+`cwd` key is a load error. `vars` substitution remains available in every
+file.
 
 Access model
 ============
@@ -315,8 +319,8 @@ of deprecated-* with available-* at load time is an error. Nesting a
 deprecated path inside an available directory is allowed (for example
 available `w:C:/proj` and deprecated `C:/proj/target`).
 
-Relative paths in these lists are resolved against the current working
-directory of the process, not settings.cwd.
+Relative paths in these lists are resolved against CWD and must stay
+inside CWD.
 
 Path checks are lexical: symlinks and junctions are not canonicalized, so
 strict isolation through symlinks is not promised.
