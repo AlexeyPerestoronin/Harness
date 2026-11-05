@@ -26,6 +26,10 @@ pub(crate) fn check_conflicts(
     deprecated_dirs: &[String],
     deprecated_files: &[String],
 ) -> Result<(), ConfError> {
+    // Contract with `load::load_fs`: these are the second validation point
+    // for `tools.fs` paths. Both points must use `resolve_in_cwd` and the
+    // same canonical error text `resolves outside of cwd`, so the messages
+    // cannot diverge.
     let a_dirs: Vec<_> = available_dirs
         .iter()
         .map(|e| resolve_available(e, cwd))
@@ -133,6 +137,11 @@ fn resolve_deprecated(entry: &str, cwd: &Path) -> Result<ResolvedPath, ConfError
 }
 
 fn resolve_raw(original: &str, path: &str, cwd: &Path) -> Result<ResolvedPath, ConfError> {
+    // Shared path resolution for conflict checks. Keep using
+    // `crate::load::resolve_in_cwd` and its canonical
+    // `resolves outside of cwd` error text; `load::load_fs` validates the
+    // same paths with the same helper before this point, so the two
+    // messages must not drift.
     let abs = crate::load::resolve_in_cwd(path, cwd)?;
     let resolved = abs.to_string_lossy().replace('\\', "/");
     let parts = comparable_parts(&abs);

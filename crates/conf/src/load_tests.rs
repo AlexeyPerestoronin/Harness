@@ -212,3 +212,32 @@ fn load_fs_rejects_invalid_deprecated_dir_patterns() {
     assert!(err.contains("deprecated-dir-patterns"), "{err}");
     assert!(err.contains("glob pattern"), "{err}");
 }
+
+#[test]
+fn load_fs_rejects_path_outside_cwd_with_canonical_message() {
+    let base = temp_path("fs-outside-cwd");
+    let cwd = base.join("work");
+    fs::create_dir_all(&cwd).unwrap();
+    write(&cwd.join("model.json5"), MODEL);
+    let conf = r#"{
+        agent: {
+            config: "model.json5",
+            mode: "safe",
+            "token-limit": 128000,
+            "iteration-limit": 50,
+            "USD-limit": 0.5,
+        },
+        tools: {
+            fs: {
+                "available-dirs": ["r:../outside"],
+                "deprecated-dirs": [],
+                "deprecated-files": [],
+            },
+        },
+    }"#;
+    write(&cwd.join("harness.json5"), conf);
+    let err = load(&cwd.join("harness.json5"), &cwd)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("resolves outside of cwd"), "{err}");
+}

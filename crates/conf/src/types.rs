@@ -250,6 +250,11 @@ pub struct ServerSettings {
 }
 
 /// Result of [`crate::load_server_config`].
+// The `Ok` variant carries `ServerSettings` (~648 bytes), which makes the
+// enum large. `load_server_config` is called rarely and is not a hot path,
+// and boxing would change the public API plus every `match` in `cli-harness`,
+// so we consciously keep this unboxed.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum ServerConfigState {
     /// Configuration is valid and partially loaded.

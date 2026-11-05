@@ -40,7 +40,22 @@ where
 {
     let conf_path = crate::fs_scope::normalize_abs(conf_path);
     ensure_conf_in_cwd(&conf_path, cwd)?;
-    let text = fs::read_to_string(&conf_path).map_err(|e| {
+    let root = read_root(&conf_path)?;
+    let mut settings = load_from_value(root, cwd, chooser)?;
+    settings.conf_dir = conf_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| settings.cwd.clone());
+    Ok(settings)
+}
+
+/// Read, substitute vars, parse and expect a root object from a conf file.
+///
+/// This is the single read/parse chain shared by [`load_with`] and
+/// [`load_server_config`] so that the order of checks and error messages
+/// cannot drift between the two loaders.
+fn read_root(conf_path: &Path) -> Result<Value, ConfError> {
+    let text = fs::read_to_string(conf_path).map_err(|e| {
         ConfError::new(format!(
             "cannot read conf file '{}': {e}",
             conf_path.display()
@@ -49,12 +64,7 @@ where
     let text = crate::vars::substitute(&text, &conf_path.display().to_string())?;
     let root: Value = json5::from_str(&text)?;
     expect_object(&root, &conf_path.display().to_string())?;
-    let mut settings = load_from_value(root, cwd, chooser)?;
-    settings.conf_dir = conf_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| settings.cwd.clone());
-    Ok(settings)
+    Ok(root)
 }
 
 /// Validate a conf JSON object (already after vars substitution) into [`Settings`].
@@ -106,8 +116,9 @@ where
 /// Load server-side configuration without selecting an agent or requiring an API key.
 ///
 /// Returns [`ServerConfigState::Missing`] when the file does not exist and
-/// [`ServerConfigState::Invalid`] for parse / validation errors. Unexpected IO
-/// errors (for example permission denied) are returned as `Err`.
+/// [`ServerConfigState::Invalid`] for read / parse / validation errors.
+/// Unexpected IO errors from the existence check (for example permission
+/// denied on a parent directory) are returned as `Err`.
 pub fn load_server_config(conf_path: &Path, cwd: &Path) -> Result<ServerConfigState, ConfError> {
     let conf_path = crate::fs_scope::normalize_abs(conf_path);
     ensure_conf_in_cwd(&conf_path, cwd)?;
@@ -123,25 +134,11 @@ pub fn load_server_config(conf_path: &Path, cwd: &Path) -> Result<ServerConfigSt
             )))
         }
     }
-    let text = fs::read_to_string(&conf_path).map_err(|e| {
-        ConfError::new(format!(
-            "cannot read conf file '{}': {e}",
-            conf_path.display()
-        ))
-    })?;
-    let text = match crate::vars::substitute(&text, &conf_path.display().to_string()) {
-        Ok(text) => text,
-        Err(e) => {
-            return Ok(ServerConfigState::Invalid {
-                message: e.to_string(),
-            })
-        }
-    };
-    let root: Value = match json5::from_str(&text) {
+    let root = match read_root(&conf_path) {
         Ok(root) => root,
         Err(e) => {
             return Ok(ServerConfigState::Invalid {
-                message: format!("json5 parse error: {e}"),
+                message: e.to_string(),
             })
         }
     };
@@ -733,6 +730,10 @@ fn load_fs(obj: &serde_json::Map<String, Value>, cwd: &Path) -> Result<FsSetting
     let deprecated_files = required_deprecated_list(obj, keys::DEPRECATED_FILES)?;
     let deprecated_dir_patterns = optional_string_list(obj, keys::DEPRECATED_DIR_PATTERNS)?;
 
+    // `tools.fs` paths are validated twice on purpose: here in `load_fs`
+    // for early per-entry errors and again in `fs_scope::check_conflicts`.
+    // Both must use `resolve_in_cwd` and keep the same canonical error text
+    // `resolves outside of cwd`, otherwise the messages can drift.
     for item in &available_dirs {
         resolve_in_cwd(strip_rw_prefix(item), cwd)?;
     }
