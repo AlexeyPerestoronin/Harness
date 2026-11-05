@@ -212,13 +212,13 @@ pub fn parse_args(args: &[String]) -> Result<CliAction, String> {
         return Err("--tls-cert and --tls-key must be used together".to_string());
     }
 
-    if cwd.is_some() || api_key.is_some() {
-        if help || help_tools || version || conf_new.is_some() {
-            return Err(
-                "--cwd and --api-key can only be used with --prompt, --prompt-file or --dump"
-                    .to_string(),
-            );
-        }
+    if (cwd.is_some() || api_key.is_some())
+        && (help || help_tools || version || conf_new.is_some())
+    {
+        return Err(
+            "--cwd and --api-key can only be used with --prompt, --prompt-file or --dump"
+                .to_string(),
+        );
     }
     if help {
         return Ok(CliAction::Help);

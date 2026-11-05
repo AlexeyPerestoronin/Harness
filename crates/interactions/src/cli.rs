@@ -110,7 +110,7 @@ impl Interaction for CliInteraction {
         .map_err(|e| InteractionError::Io(e.to_string()))??;
 
         let answer = answer
-            .trim_end_matches(|c| c == '\r' || c == '\n')
+            .trim_end_matches(['\r', '\n'])
             .to_string();
 
         if write_log {

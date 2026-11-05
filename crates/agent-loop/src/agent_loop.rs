@@ -67,10 +67,8 @@ impl AgentLoop {
     /// Create the tool registry and the vendor agent.
     ///
     /// `session_dir` is used as the tool `temp-dir` for patches.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cwd: PathBuf,
-        _log_folder: String,
         agent: AgentSettings,
         tools: ToolsSettings,
         interaction: Arc<dyn Interaction>,

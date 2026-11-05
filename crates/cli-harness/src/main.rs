@@ -139,7 +139,6 @@ async fn start_new_session(
 
     let loop_ = agent_loop::AgentLoop::new(
         settings.cwd.clone(),
-        settings.agent_session.log_folder.clone(),
         agent.clone(),
         settings.tools.clone(),
         interaction,
@@ -202,7 +201,6 @@ async fn start_resume_session(
 
     let loop_ = agent_loop::AgentLoop::new(
         settings.cwd.clone(),
-        settings.log_folder.clone(),
         settings.agent.clone(),
         settings.tools.clone(),
         interaction,

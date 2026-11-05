@@ -85,7 +85,6 @@ async fn run_inner(
 
     let agent_loop = match AgentLoop::new(
         settings.cwd.clone(),
-        settings.agent_session.log_folder.clone(),
         resolved.agent.clone(),
         settings.tools.clone(),
         interaction,

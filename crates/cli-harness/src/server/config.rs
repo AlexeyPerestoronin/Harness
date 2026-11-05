@@ -120,18 +120,9 @@ pub async fn config_default(
     state.touch_live_deadline().await;
 
     let (path, cwd) = state_cwd_and_path(&state).await;
-    let path_text = path.to_string_lossy().into_owned();
 
     if !path.exists() {
-        write_config_file(&path, &conf::template_text())?;
-        refresh_server_config(&state, &path, &cwd).await;
-        let valid = state.config.read().await.config_state == ConfigState::Ok;
-        return Ok(Json(ConfigDefaultResponse {
-            path: path_text,
-            exists: true,
-            text: conf::template_text(),
-            valid,
-        }));
+        return create_default_config_response(&state, &path, &cwd).await;
     }
 
     match conf::load_server_config(&path, &cwd) {
@@ -139,31 +130,39 @@ pub async fn config_default(
             let text = serde_json::to_string_pretty(&secret::redact(&settings.source))
                 .map_err(|error| internal("cannot serialize config", error))?;
             Ok(Json(ConfigDefaultResponse {
-                path: path_text,
+                path: path.to_string_lossy().into_owned(),
                 exists: true,
                 text,
                 valid: true,
             }))
         }
         Ok(ServerConfigState::Invalid { .. }) => Ok(Json(ConfigDefaultResponse {
-            path: path_text,
+            path: path.to_string_lossy().into_owned(),
             exists: true,
             text: String::new(),
             valid: false,
         })),
         Ok(ServerConfigState::Missing) => {
-            write_config_file(&path, &conf::template_text())?;
-            refresh_server_config(&state, &path, &cwd).await;
-            let valid = state.config.read().await.config_state == ConfigState::Ok;
-            Ok(Json(ConfigDefaultResponse {
-                path: path_text,
-                exists: true,
-                text: conf::template_text(),
-                valid,
-            }))
+            create_default_config_response(&state, &path, &cwd).await
         }
         Err(error) => Err(internal("cannot read config", error)),
     }
+}
+
+async fn create_default_config_response(
+    state: &Arc<ServerState>,
+    path: &Path,
+    cwd: &Path,
+) -> Result<Json<ConfigDefaultResponse>, ApiError> {
+    write_config_file(path, &conf::template_text())?;
+    refresh_server_config(state, path, cwd).await;
+    let valid = state.config.read().await.config_state == ConfigState::Ok;
+    Ok(Json(ConfigDefaultResponse {
+        path: path.to_string_lossy().into_owned(),
+        exists: true,
+        text: conf::template_text(),
+        valid,
+    }))
 }
 
 fn read_existing_parsed(path: &Path, cwd: &Path) -> Option<Value> {
@@ -331,4 +330,117 @@ fn internal(message: impl Into<String>, error: impl std::fmt::Display) -> ApiErr
         "CONFIG_ERROR",
         format!("{}: {error}", message.into()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    use tokio::sync::{Mutex, RwLock};
+
+    use crate::server::state::LoadedServerConfig;
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "harness-config-test-{label}-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn create_template_agent_file(cwd: &Path) {
+        let agent_file = cwd.join("harness/agents/grok-4.6.json5");
+        std::fs::create_dir_all(agent_file.parent().unwrap()).unwrap();
+        std::fs::write(&agent_file, "").unwrap();
+    }
+
+    fn test_server_state(path: PathBuf, cwd: PathBuf) -> Arc<ServerState> {
+        Arc::new(ServerState {
+            config: RwLock::new(LoadedServerConfig {
+                path,
+                cwd,
+                config_state: ConfigState::Missing,
+                settings: None,
+                server: conf::ServerConfig::default(),
+            }),
+            active: Mutex::new(None),
+            auth_token: auth::AuthToken::generate(),
+            live_timeout: Duration::from_secs(300),
+            live_deadline: Mutex::new(Instant::now() + Duration::from_secs(300)),
+        })
+    }
+
+    #[test]
+    fn validate_config_text_accepts_config_without_cwd() {
+        let dir = unique_temp_dir("valid-no-cwd");
+        let target = dir.join("harness.json5");
+        create_template_agent_file(&dir);
+
+        let result = validate_config_text(&conf::template_text(), &dir, &target);
+        assert!(result.is_ok(), "unexpected error: {result:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validate_config_text_rejects_root_cwd_key() {
+        let dir = unique_temp_dir("reject-cwd-key");
+        let target = dir.join("harness.json5");
+
+        let error = validate_config_text("{ cwd: \"C:/somewhere\" }", &dir, &target)
+            .expect_err("config with root cwd key must be rejected");
+        assert!(
+            error.contains("'cwd' is no longer set in the config"),
+            "unexpected error: {error}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn config_default_creates_template_when_missing() {
+        let dir = unique_temp_dir("default-missing");
+        let path = dir.join("harness.json5");
+        create_template_agent_file(&dir);
+        let state = test_server_state(path.clone(), dir.clone());
+
+        let response = config_default(State(state)).await.unwrap().0;
+
+        assert_eq!(response.path, path.to_string_lossy().into_owned());
+        assert!(response.exists);
+        assert!(response.valid);
+        assert_eq!(response.text, conf::template_text());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            conf::template_text()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn config_default_keeps_existing_valid_config() {
+        let dir = unique_temp_dir("default-existing");
+        let path = dir.join("harness.json5");
+        std::fs::write(&path, conf::template_text()).unwrap();
+        create_template_agent_file(&dir);
+        let before = std::fs::read_to_string(&path).unwrap();
+        let state = test_server_state(path.clone(), dir.clone());
+
+        let response = config_default(State(state)).await.unwrap().0;
+
+        assert_eq!(response.path, path.to_string_lossy().into_owned());
+        assert!(response.exists);
+        assert!(response.valid);
+        assert_ne!(response.text, conf::template_text());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

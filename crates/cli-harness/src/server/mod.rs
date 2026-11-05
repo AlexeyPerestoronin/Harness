@@ -147,10 +147,7 @@ async fn print_startup_info(
             println!("tls: cert={} key={}", cert.display(), key.display());
         }
         _ => {
-            let tls_dir = tls_paths
-                .cert
-                .parent()
-                .unwrap_or_else(|| tls_paths.cert.as_path());
+            let tls_dir = tls_paths.cert.parent().unwrap_or(tls_paths.cert.as_path());
             println!("tls: auto-generated in {}", tls_dir.display());
         }
     }
