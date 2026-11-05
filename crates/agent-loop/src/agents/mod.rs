@@ -188,6 +188,52 @@ pub(crate) fn format_real_cost(value: Option<f64>) -> String {
     }
 }
 
+/// Log the shared "Sessions statistic" block.
+///
+/// Used by OpenAI-compatible agents and Claude. Google keeps its own version
+/// because its output format differs.
+pub(crate) async fn log_usage_summary(
+    interaction: &Arc<dyn Interaction>,
+    usage: &UsageStats,
+    total_tokens: i64,
+) {
+    log_line(interaction, "Sessions statistic").await;
+    log_line(
+        interaction,
+        &format!("- total requests: {}", usage.requests),
+    )
+    .await;
+    log_line(interaction, &format!("- total tokens: {total_tokens}")).await;
+    log_line(
+        interaction,
+        &format!(
+            "    → input tokens: {} (from stats)",
+            usage.input_tokens
+        ),
+    )
+    .await;
+    log_line(
+        interaction,
+        &format!("    ← output tokens: {}", usage.output_tokens),
+    )
+    .await;
+    log_line(
+        interaction,
+        &format!("    ↔ cached tokens: {}", usage.cached_tokens),
+    )
+    .await;
+    log_line(
+        interaction,
+        &format!("- USD approximated: {}", format_usd(usage.total_cost_usd)),
+    )
+    .await;
+    log_line(
+        interaction,
+        &format!("- USD real: {}", format_real_cost(usage.real_cost_usd)),
+    )
+    .await;
+}
+
 fn json_f64(v: &serde_json::Value) -> Option<f64> {
     v.as_f64()
         .or_else(|| v.as_i64().map(|n| n as f64))

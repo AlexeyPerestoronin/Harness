@@ -156,4 +156,50 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn embed_extract_round_trip_with_real_conf_source() {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let cwd = std::env::temp_dir().join(format!(
+            "harness-dump-settings-conf-{}-{id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let conf_path = cwd.join("harness.json5");
+        let agent_config_path = cwd.join("agent.config");
+        let dump_path = cwd.join("session.dump.json");
+
+        std::fs::write(&agent_config_path, "").unwrap();
+        std::fs::write(
+            &conf_path,
+            r#"{
+                agent: {
+                    config: "agent.config",
+                    mode: "safe",
+                    "token-limit": 1000,
+                    "iteration-limit": 10,
+                    "USD-limit": 5,
+                }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(&dump_path, r#"{"vendor": "keep-me"}"#).unwrap();
+
+        let settings = match conf::load_server_config(&conf_path, &cwd).unwrap() {
+            conf::ServerConfigState::Ok(settings) => settings,
+            other => panic!("expected Ok(settings), got {other:?}"),
+        };
+        assert!(settings.source.get("cwd").is_none());
+
+        embed(&dump_path, &settings.source, &cwd).unwrap();
+        let (extracted_settings, extracted_cwd) = extract(&dump_path).unwrap();
+
+        assert!(extracted_settings.get("cwd").is_none());
+        assert_eq!(extracted_settings, settings.source);
+        assert!(extracted_cwd.is_absolute());
+        assert_eq!(extracted_cwd, cwd);
+
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
 }

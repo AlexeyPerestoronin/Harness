@@ -1,9 +1,8 @@
-//! Shared OpenAI-compatible `chat/completions` client for DeepSeek and AliBaba.
+//! Shared OpenAI-compatible `chat/completions` client for DeepSeek, AliBaba and xAI.
 //!
-//! xAI keeps its own parser and headers (`x-grok-conv-id`, `cost_in_usd_ticks`).
-//! This module owns the protocol both new vendors actually share: messages,
-//! tools, cache-token mapping and USD accounting. Vendor files only supply
-//! URL, `AgentKind` and the API model.
+//! Vendor files supply URL, `AgentKind`, API model and optional extensions:
+//! extra headers, extra body fields, cache-token mapping and vendor session
+//! data stored in dump files.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -16,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use tools::ToolRegistry;
 
 use super::{
-    accumulate_real_cost, approximate_usd, format_real_cost, invoke_tool, log_line, openai_tools,
+    accumulate_real_cost, approximate_usd, invoke_tool, log_line, log_usage_summary, openai_tools,
     real_cost_from_body, Agent, RealCost, UsageStats,
 };
 use crate::vendor_request::VendorRequest;
@@ -26,6 +25,8 @@ use crate::vendor_request::VendorRequest;
 pub(crate) struct ChatDump {
     pub messages: Vec<Value>,
     pub usage_stats: UsageStats,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor_session: Option<Value>,
 }
 
 /// One OpenAI-style `tool_calls[]` entry.
@@ -34,6 +35,16 @@ pub(crate) struct ChatToolCall {
     pub id: String,
     pub name: String,
     pub arguments: String,
+}
+
+/// Vendor-specific extensions for an OpenAI-compatible agent.
+pub(crate) struct OpenAiCompatConfig {
+    pub url: &'static str,
+    pub vendor_label: &'static str,
+    pub cached_tokens: fn(&Value) -> i64,
+    pub vendor_session: Option<Value>,
+    pub vendor_headers: fn(&Value) -> Vec<(String, String)>,
+    pub vendor_body_fields: fn(&Value) -> Value,
 }
 
 /// Parsed `chat/completions` body (unit-tested on fixtures, no HTTP).
@@ -50,7 +61,7 @@ pub(crate) struct ParsedChat {
     pub real_cost: Option<RealCost>,
 }
 
-/// OpenAI-compatible chat agent used by DeepSeek and AliBaba wrappers.
+/// OpenAI-compatible chat agent used by DeepSeek, AliBaba and xAI wrappers.
 pub(crate) struct OpenAiCompatAgent {
     tools: Arc<ToolRegistry>,
     interaction: Arc<dyn Interaction>,
@@ -69,6 +80,10 @@ pub(crate) struct OpenAiCompatAgent {
     messages: Vec<Value>,
     http: VendorRequest,
     cancel: CancellationToken,
+    cached_tokens: fn(&Value) -> i64,
+    vendor_session: Option<Value>,
+    vendor_headers: fn(&Value) -> Vec<(String, String)>,
+    vendor_body_fields: fn(&Value) -> Value,
 }
 
 impl OpenAiCompatAgent {
@@ -82,15 +97,39 @@ impl OpenAiCompatAgent {
         url: &'static str,
         vendor_label: &'static str,
     ) -> Self {
+        Self::create_with(
+            tools,
+            interaction,
+            agent,
+            api_model,
+            OpenAiCompatConfig {
+                url,
+                vendor_label,
+                cached_tokens: cached_tokens_from_usage,
+                vendor_session: None,
+                vendor_headers: empty_vendor_headers,
+                vendor_body_fields: empty_vendor_body_fields,
+            },
+        )
+    }
+
+    /// Build from resolved settings plus a full vendor extension config.
+    pub(crate) fn create_with(
+        tools: Arc<ToolRegistry>,
+        interaction: Arc<dyn Interaction>,
+        agent: &AgentSettings,
+        api_model: String,
+        config: OpenAiCompatConfig,
+    ) -> Self {
         Self {
             tools,
             interaction: interaction.clone(),
             api_key: agent.api_key.clone(),
             vendor: agent.vendor.clone(),
-            vendor_label,
+            vendor_label: config.vendor_label,
             display_name: agent.name.clone(),
             api_model,
-            url,
+            url: config.url,
             token_limit: agent.token_limit,
             usd_limit: agent.usd_limit,
             input_price: agent.input_price,
@@ -100,30 +139,41 @@ impl OpenAiCompatAgent {
             messages: Vec::new(),
             http: VendorRequest::new(agent.rpm, agent.tpm, agent.rpd, interaction),
             cancel: CancellationToken::new(),
+            cached_tokens: config.cached_tokens,
+            vendor_session: config.vendor_session,
+            vendor_headers: config.vendor_headers,
+            vendor_body_fields: config.vendor_body_fields,
         }
     }
 
     async fn execute_request(&mut self) -> Result<ParsedChat, String> {
         let tools = openai_tools(&self.tools.list());
-        let body = json!({
-            "model": self.api_model,
-            "messages": self.messages,
-            "tools": tools,
-        });
+        let mut body = serde_json::Map::new();
+        body.insert("model".into(), Value::String(self.api_model.clone()));
+        body.insert("messages".into(), Value::Array(self.messages.clone()));
+        body.insert("tools".into(), tools);
+        let session = self.vendor_session.clone().unwrap_or(Value::Null);
+        let extra = (self.vendor_body_fields)(&session);
+        if let Value::Object(extra) = extra {
+            for (key, value) in extra {
+                body.insert(key, value);
+            }
+        }
+        let body = Value::Object(body);
         let auth = format!("Bearer {}", self.api_key);
+        let mut headers: Vec<(&str, &str)> = vec![
+            ("Authorization", auth.as_str()),
+            ("Content-Type", "application/json"),
+        ];
+        let vendor_headers = (self.vendor_headers)(&session);
+        for (key, value) in &vendor_headers {
+            headers.push((key.as_str(), value.as_str()));
+        }
         let text = self
             .http
-            .send_json(
-                self.url,
-                &[
-                    ("Authorization", auth.as_str()),
-                    ("Content-Type", "application/json"),
-                ],
-                &body,
-                &self.cancel,
-            )
+            .send_json(self.url, &headers, &body, &self.cancel)
             .await?;
-        let parsed = parse_chat_completion(&text, self.vendor_label)?;
+        let parsed = parse_chat_completion(&text, self.vendor_label, self.cached_tokens)?;
         self.http
             .record_tokens(parsed.prompt_tokens + parsed.completion_tokens);
         self.usage.requests += 1;
@@ -239,46 +289,10 @@ impl Agent for OpenAiCompatAgent {
     }
 
     async fn finish(&self) {
-        let total = self.usage.input_tokens + self.usage.output_tokens;
-        log_line(&self.interaction, "Sessions statistic").await;
-        log_line(
+        log_usage_summary(
             &self.interaction,
-            &format!("- total requests: {}", self.usage.requests),
-        )
-        .await;
-        log_line(&self.interaction, &format!("- total tokens: {total}")).await;
-        log_line(
-            &self.interaction,
-            &format!(
-                "    → input tokens: {} (from stats)",
-                self.usage.input_tokens
-            ),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!("    ← output tokens: {}", self.usage.output_tokens),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!("    ↔ cached tokens: {}", self.usage.cached_tokens),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!(
-                "- USD approximated: {}",
-                super::format_usd(self.usage.total_cost_usd)
-            ),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!(
-                "- USD real: {}",
-                format_real_cost(self.usage.real_cost_usd)
-            ),
+            &self.usage,
+            self.usage.input_tokens + self.usage.output_tokens,
         )
         .await;
     }
@@ -287,6 +301,7 @@ impl Agent for OpenAiCompatAgent {
         let data = ChatDump {
             messages: self.messages.clone(),
             usage_stats: self.usage.clone(),
+            vendor_session: self.vendor_session.clone(),
         };
         let text = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
         std::fs::write(path, text).map_err(|e| e.to_string())
@@ -297,6 +312,7 @@ impl Agent for OpenAiCompatAgent {
         let data: ChatDump = serde_json::from_str(&text).map_err(|e| e.to_string())?;
         self.messages = data.messages;
         self.usage = data.usage_stats;
+        self.vendor_session = data.vendor_session;
         Ok(())
     }
 
@@ -306,7 +322,11 @@ impl Agent for OpenAiCompatAgent {
 }
 
 /// Parse an OpenAI-compatible chat completion JSON body.
-pub(crate) fn parse_chat_completion(text: &str, vendor: &str) -> Result<ParsedChat, String> {
+pub(crate) fn parse_chat_completion(
+    text: &str,
+    vendor: &str,
+    cached_tokens: fn(&Value) -> i64,
+) -> Result<ParsedChat, String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("{vendor} json: {e}"))?;
     let choice = v
         .get("choices")
@@ -367,7 +387,7 @@ pub(crate) fn parse_chat_completion(text: &str, vendor: &str) -> Result<ParsedCh
         message,
         prompt_tokens: json_i64(&usage, "prompt_tokens"),
         completion_tokens: json_i64(&usage, "completion_tokens"),
-        cached_tokens: cached_tokens_from_usage(&usage),
+        cached_tokens: cached_tokens(&usage),
         real_cost,
     })
 }
@@ -403,4 +423,12 @@ pub(crate) fn cached_tokens_from_usage(usage: &Value) -> i64 {
 
 fn json_i64(v: &Value, key: &str) -> i64 {
     v.get(key).and_then(|x| x.as_i64()).unwrap_or(0)
+}
+
+fn empty_vendor_headers(_: &Value) -> Vec<(String, String)> {
+    Vec::new()
+}
+
+fn empty_vendor_body_fields(_: &Value) -> Value {
+    Value::Object(serde_json::Map::new())
 }

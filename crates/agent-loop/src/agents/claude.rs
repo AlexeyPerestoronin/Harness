@@ -18,8 +18,8 @@ use tokio_util::sync::CancellationToken;
 use tools::ToolRegistry;
 
 use super::{
-    accumulate_real_cost, approximate_usd, claude_tools, format_real_cost, invoke_tool, log_line,
-    real_cost_from_body, Agent, RealCost, UsageStats,
+    accumulate_real_cost, approximate_usd, claude_tools, invoke_tool, log_line,
+    log_usage_summary, real_cost_from_body, Agent, RealCost, UsageStats,
 };
 use crate::vendor_request::VendorRequest;
 
@@ -212,46 +212,10 @@ impl Agent for ClaudeAgent {
     }
 
     async fn finish(&self) {
-        let total = self.usage.input_tokens + self.usage.output_tokens;
-        log_line(&self.interaction, "Sessions statistic").await;
-        log_line(
+        log_usage_summary(
             &self.interaction,
-            &format!("- total requests: {}", self.usage.requests),
-        )
-        .await;
-        log_line(&self.interaction, &format!("- total tokens: {total}")).await;
-        log_line(
-            &self.interaction,
-            &format!(
-                "    → input tokens: {} (from stats)",
-                self.usage.input_tokens
-            ),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!("    ← output tokens: {}", self.usage.output_tokens),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!("    ↔ cached tokens: {}", self.usage.cached_tokens),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!(
-                "- USD approximated: {}",
-                super::format_usd(self.usage.total_cost_usd)
-            ),
-        )
-        .await;
-        log_line(
-            &self.interaction,
-            &format!(
-                "- USD real: {}",
-                format_real_cost(self.usage.real_cost_usd)
-            ),
+            &self.usage,
+            self.usage.input_tokens + self.usage.output_tokens,
         )
         .await;
     }

@@ -528,7 +528,7 @@ impl VendorRequest {
                     waiting.execute(ctx).await?;
                 }
                 result = &mut read_body => {
-                    return result.map_err(|e| PipelineError::Transport(e));
+                    return result.map_err(PipelineError::Transport);
                 }
             }
         }
