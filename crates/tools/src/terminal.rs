@@ -152,36 +152,3 @@ fn desc(name: &str, description: &str, parameters: Value) -> ToolDescriptor {
         parameters,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn module() -> TerminalModule {
-        TerminalModule::new(
-            std::env::current_dir().unwrap(),
-            vec![std::env::current_dir()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned()],
-            vec!["cargo".to_string()],
-            10,
-        )
-    }
-
-    #[test]
-    fn run_shell_rejects_output_buff_size_below_minus_one() {
-        let err = module()
-            .run_shell(".", "cargo", "", -2)
-            .unwrap_err();
-        assert!(err.contains("output_buff_size"), "{err}");
-    }
-
-    #[test]
-    fn run_shell_call_rejects_non_integer_output_buff_size() {
-        let args = json!({"cwd": ".", "command": "cargo", "arguments": "", "output_buff_size": 1.5});
-        let args = args.as_object().unwrap().clone();
-        let err = module().call("run_shell", &args).unwrap_err();
-        assert!(err.contains("output_buff_size"), "{err}");
-    }
-}

@@ -98,8 +98,6 @@ pub const INPUT_PRICE: &str = "input-price";
 pub const OUTPUT_PRICE: &str = "output-price";
 /// USD per 1_000_000 cached tokens. `-1` = free.
 pub const CACHED_PRICE: &str = "cached-price";
-/// Legacy iteration key. Not allowed in the model file.
-pub const ITERATIONS: &str = "iterations";
 
 // ---------------------------------------------------------------------------
 // Tool module names (keys of the `tools` object)
@@ -128,8 +126,6 @@ pub const AVAILABLE_DIRS: &str = "available-dirs";
 pub const AVAILABLE_FILE_EXTENSIONS: &str = "available-file-extensions";
 /// Exact-file allow-list with `r:` / `w:` prefixes.
 pub const AVAILABLE_FILES: &str = "available-files";
-/// Former name of [`AVAILABLE_FILES`]. Presence in `tools.fs` is a load error.
-pub const EXTRA_SCOPE: &str = "extra-scope";
 /// Directory denylist without `r:` / `w:` prefixes.
 pub const DEPRECATED_DIRS: &str = "deprecated-dirs";
 /// File denylist without `r:` / `w:` prefixes.

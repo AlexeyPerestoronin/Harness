@@ -4,7 +4,7 @@
 //! candidate when vars-substitution + json5 parse yields a known `vendor` +
 //! `name` and a `limits` / `price` block valid enough to show the model.
 //! `api-key` is not read. `limits.USD` is checked only for the chosen file.
-//! A legacy flat key, or an invalid `limits` / `price`, skips that file only.
+//! An invalid `limits` / `price` skips that file only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -78,7 +78,7 @@ fn file_name_lower(path: &Path) -> String {
 }
 
 /// Same read pipeline as a normal agent file (vars → json5). Does not read
-/// `api-key`. Rejects legacy root keys and invalid `limits` / `price` fields.
+/// `api-key`. Rejects invalid `limits` / `price` fields.
 fn candidate_from_file(path: &Path) -> Result<AgentCandidate, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read: {e}"))?;
     let text =

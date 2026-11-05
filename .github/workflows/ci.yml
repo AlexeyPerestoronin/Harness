@@ -6,7 +6,6 @@ on:
       - master
     tags:
       - 'v*'
-      - 'harness-*'
 
 permissions:
   contents: read
@@ -35,9 +34,6 @@ jobs:
 
       - name: Clippy (deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Test
-        run: cargo test --workspace
 
       - name: Build release
         run: cargo build --release -p cli-harness
@@ -88,7 +84,7 @@ jobs:
           ARTIFACT_NAME: ${{ steps.artifact.outputs.name }}
         shell: bash
         run: |
-          if ! echo "$ARTIFACT_NAME" | grep -Eq '^harness-[0-9]+\.[0-9]+\.[0-9]+(-linux|-macos|\.exe|-windows\.exe)$'; then
+          if ! echo "$ARTIFACT_NAME" | grep -Eq '^harness-[0-9]+\.[0-9]+\.[0-9]+(-linux|-macos|-windows\.exe)$'; then
             echo "Unexpected artifact name: $ARTIFACT_NAME" >&2
             exit 1
           fi

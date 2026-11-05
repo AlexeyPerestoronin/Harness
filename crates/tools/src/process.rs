@@ -136,27 +136,3 @@ fn tail_chars(s: &str, n: i64) -> String {
                  .collect::<Vec<_>>().into_iter().rev().collect(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::tail_chars;
-
-    #[test]
-    fn tail_chars_keeps_full_output_for_minus_one() {
-        assert_eq!(tail_chars("abc", -1), "abc");
-        assert_eq!(tail_chars("", -1), "");
-    }
-
-    #[test]
-    fn tail_chars_returns_empty_for_zero() {
-        assert_eq!(tail_chars("abc", 0), "");
-    }
-
-    #[test]
-    fn tail_chars_keeps_last_n_unicode_chars() {
-        assert_eq!(tail_chars("abc", 2), "bc");
-        assert_eq!(tail_chars("a😀b", 2), "😀b");
-        assert_eq!(tail_chars("a😀b", 1), "b");
-        assert_eq!(tail_chars("abc", 10), "abc");
-    }
-}

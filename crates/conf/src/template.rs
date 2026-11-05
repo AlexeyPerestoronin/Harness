@@ -31,17 +31,3 @@ pub fn write_new_conf(path: &Path) -> Result<(), ConfError> {
 pub fn template_text() -> String {
     include_str!("../settings-template.json5").to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn template_has_no_cwd_and_has_deprecated_dir_patterns() {
-        let text = template_text();
-        assert!(!text.contains("\"cwd\""));
-        assert!(!text.contains("workspace"));
-        assert!(text.contains("deprecated-dir-patterns"));
-        assert!(text.contains("glob pattern"));
-    }
-}

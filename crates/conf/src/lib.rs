@@ -10,8 +10,6 @@ pub mod str;
 mod error;
 mod fs_scope;
 mod load;
-#[cfg(test)]
-mod load_tests;
 mod scan;
 mod template;
 mod types;

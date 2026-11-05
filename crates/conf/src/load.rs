@@ -1,9 +1,8 @@
 //! Load `harness.json5` and the nested model file into [`crate::Settings`],
 //! or partially into [`crate::ServerSettings`] for the HTTP server.
 //!
-//! A model file must contain `limits` and `price`. Flat legacy keys
-//! (`token-limit`, `iteration-limit`, `rpm`, ...) are a load error, not a
-//! silent migration. Session limits still come from `harness.json5`.
+//! A model file must contain `limits` and `price`. Additional flat keys at the
+//! top level of a model file are ignored. Session limits still come from `harness.json5`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -716,13 +715,6 @@ fn load_tools(
 }
 
 fn load_fs(obj: &serde_json::Map<String, Value>, cwd: &Path) -> Result<FsSettings, ConfError> {
-    if obj.contains_key(keys::EXTRA_SCOPE) {
-        return Err(ConfError::new(format!(
-            "'{}' was renamed to '{}'",
-            keys::EXTRA_SCOPE,
-            keys::AVAILABLE_FILES
-        )));
-    }
     let available_dirs = optional_string_list(obj, keys::AVAILABLE_DIRS)?;
     let available_file_extensions = optional_string_list(obj, keys::AVAILABLE_FILE_EXTENSIONS)?;
     let available_files = optional_string_list(obj, keys::AVAILABLE_FILES)?;
@@ -1098,7 +1090,6 @@ fn read_model_numbers(
     model_obj: &serde_json::Map<String, Value>,
     require_usd: bool,
 ) -> Result<ModelNumbers, ConfError> {
-    reject_legacy_model_keys(model_obj)?;
     let limits = required_model_object(model_obj, keys::LIMITS)?;
     reject_unknown_keys(
         limits,
@@ -1151,26 +1142,6 @@ fn read_price(model_obj: &serde_json::Map<String, Value>) -> Result<ModelPrice, 
         output: required_model_non_negative(price, keys::OUTPUT_PRICE)?,
         cached: required_model_non_negative(price, keys::CACHED_PRICE)?,
     })
-}
-
-fn reject_legacy_model_keys(obj: &serde_json::Map<String, Value>) -> Result<(), ConfError> {
-    const LEGACY: &[&str] = &[
-        keys::TOKEN_LIMIT,
-        keys::ITERATION_LIMIT,
-        keys::ITERATIONS,
-        keys::USD_LIMIT,
-        keys::RPM,
-        keys::TPM,
-        keys::RPD,
-    ];
-    for key in LEGACY {
-        if obj.contains_key(*key) {
-            return Err(ConfError::new(format!(
-                "'{key}' is not allowed in the model file"
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn reject_unknown_keys(
