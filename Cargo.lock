@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agent-loop"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -66,7 +66,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auth"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "cli-harness"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "agent-loop",
  "async-trait",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "conf"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "json5",
  "regex",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "harness-api"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "serde",
 ]
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "interactions"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "async-trait",
  "logger",
@@ -770,7 +770,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logger"
-version = "2.1.0"
+version = "2.1.1"
 
 [[package]]
 name = "lru-slab"
@@ -1540,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "conf",
  "encoding_rs",
